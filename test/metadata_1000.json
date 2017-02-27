@@ -1,0 +1,23 @@
+{
+  "@context": { 
+    "@vocab": "./conf/EudatControlledVocabulary.jsonld",
+    "path": "@id"
+  },
+  "Structure": [
+    {
+      "@type": "Entity",
+      "path": "_:1000_objects/dir*/*.bin",
+      "type": "Data",
+      "format": "random"
+    },
+    {
+      "@type": "Entity",
+      "path": "_:1000_objects/metadir/file${num}.meta", 
+      "type": "DescriptiveMetaData",
+      "format": "random",
+      "isRelatedTo": [ 
+        { "@id": "_:1000_objects/dir${num}/*.bin" }
+      ]
+    }
+  ]
+}

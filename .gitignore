@@ -87,3 +87,7 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# local conf
+conf/mets_factory.conf
+conf/b2safe_neo4j.conf

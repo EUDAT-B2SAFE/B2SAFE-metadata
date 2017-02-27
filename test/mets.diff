@@ -1,0 +1,52 @@
+{
+    "changes in logical collection rel_1000_objects_3c319edfb66ceab8f1f3d1cf15f56593": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_1734d36cbf562de3c1f5cd84639aa6c1": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "deleted files:": {}, 
+    "changes in logical collection rel_1000_objects_f0053da777b68746098e84278f03d2b3": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_6a3498996bb36caf830dbfb25fcb04f8": {
+        "added divs": {
+            "_1000_objects_dir001_file101.bin": "<?xml version=\"1.0\" encoding=\"utf-8\"?><ns1:div LABEL=\"random\" TYPE=\"Data\" xmlns:ns1=\"http://www.loc.gov/METS/\"><ns1:fptr FILEID=\"_1000_objects_dir001_file101.bin\"/></ns1:div>"
+        }, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_9e886a4887299500d1f9fde2db0130fc": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_0d03ff32abb47c40184c0cddeac9f62e": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_7a99deb141c59343a7d8a3a662d41536": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_8a8dfa59738986f15f2b7491a3821f06": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "changes in logical collection rel_1000_objects_abbe5aa8d6064a0ba5cff8a5524a6b85": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "added default div _1000_objects_manifest.xml.old": "<?xml version=\"1.0\" encoding=\"utf-8\"?><ns1:div LABEL=\"unknown\" TYPE=\"Data\" xmlns:ns1=\"http://www.loc.gov/METS/\"><ns1:fptr FILEID=\"_1000_objects_manifest.xml.old\"/></ns1:div>", 
+    "deleted directories:": {}, 
+    "added directories:": {}, 
+    "changes in logical collection rel_1000_objects_d367aaccdaca385f247cd4c75f59a7c3": {
+        "added divs": {}, 
+        "deleted divs": {}
+    }, 
+    "added files:": {
+        "_1000_objects_dir001_file101.bin": "<?xml version=\"1.0\" encoding=\"utf-8\"?><ns1:file ID=\"_1000_objects_dir001_file101.bin\" xmlns:ns1=\"http://www.loc.gov/METS/\" xmlns:ns2=\"http://www.w3.org/1999/xlink\"><ns1:FLocat LOCTYPE=\"URL\" ns2:href=\"file://1000_objects/dir001/file101.bin\" ns2:type=\"simple\"/></ns1:file>", 
+        "_1000_objects_manifest.xml.old": "<?xml version=\"1.0\" encoding=\"utf-8\"?><ns1:file ID=\"_1000_objects_manifest.xml.old\" xmlns:ns1=\"http://www.loc.gov/METS/\" xmlns:ns2=\"http://www.w3.org/1999/xlink\"><ns1:FLocat LOCTYPE=\"URL\" ns2:href=\"file://1000_objects/manifest.xml.old\" ns2:type=\"simple\"/></ns1:file>"
+    }
+}
