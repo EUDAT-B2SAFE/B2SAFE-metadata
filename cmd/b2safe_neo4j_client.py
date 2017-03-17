@@ -2,18 +2,19 @@
 # -*- coding: utf-8 -*- 
 
 import argparse
-import logging
+#import logging
 import logging.handlers
 import ConfigParser
 import manifest
-import pprint
+#import pprint
 import hashlib
-import uuid
 import requests
 import json
 import base64
 
+from compare_mets_manifests import MetsManifestComparator
 from py2neo import Graph, Node, Relationship, authenticate, GraphError
+from manifest.libmets import CreateFromDocument
 
 logger = logging.getLogger('GraphDBClient')
 
@@ -273,7 +274,7 @@ class GraphDBClient():
                    "UNIQUELY_IDENTIFIED_BY,persistent_identifier]")
             return True
 
-        path = de.properties["location"]
+        #path = de.properties["location"]
         sumValue = de.properties["checksum"]
         pid = None
         if absolutePath in self.metadata.keys():
@@ -329,7 +330,7 @@ class GraphDBClient():
         if master:
             pid = self.metadata[absolutePath]['PID']
             if pid == master:
-                return false
+                return False
             if 'PPID' in self.metadata[absolutePath].keys():
                 parent = self.metadata[absolutePath]['PPID']
         else:
@@ -393,8 +394,8 @@ class GraphDBClient():
 #TODO add multiple resources management
         resources = None
         if absolutePath in self.metadata.keys():
-             res = self.metadata[absolutePath]['resource']
-             resources = [res]
+            res = self.metadata[absolutePath]['resource']
+            resources = [res]
         if resources:
             for res in resources:
                 resN = self.graph.find_one('Resource', 'name', res)
@@ -421,7 +422,8 @@ class GraphDBClient():
             entity = self.graph.find_one(eudat_type, "name", name)
             if entity is None:
                 entity = entityNew  
-            self.graph.create(entity)
+                #TODO: changed ask Claudio
+                self.graph.create(entity)
             logger.debug('Entity created: ' + str(entity))
             return entity
 
@@ -435,7 +437,7 @@ class GraphDBClient():
                                      value = value,
                                      name = hashVal)
         if self.conf.dryrun:
-            print ("create the graph node ["+str(pointer)+"]")
+            print ("create the graph node ["+str(pointerNew)+"]")
         else:
             pointer = self.graph.find_one('Pointer', "name", hashVal)
             if pointer is None:
@@ -444,8 +446,75 @@ class GraphDBClient():
             logger.debug('Created pointer: ' + str(pointer))
 
         return pointer
-
-
+    
+    def updateGraphAddingNodes(self, addetedDivs, collectionName, smap):
+        if self.conf.dryrun: 
+            print("add nodes and relations to the aggregation node")
+        else: 
+            collectionNode = self.graph.find_one("Aggregation", "name", collectionName)
+            if collectionNode is None:
+                newCollectionNode = Node("Aggregation", location = '', name = collectionName, checksum = '', nodetype = 'entityRelation')
+                self.graph.create(newCollectionNode)
+                collectionNode = newCollectionNode
+            
+            filePaths = smap['filePaths']
+            for div in addetedDivs: 
+                fileID = div.fptr.field
+                path = filePaths[fileID]
+                
+                de = self._defineDigitalEntity(div.format(), path, div.type(), fileID)
+                
+                de_belongs_to_agg = Relationship(de, "BELONGS_TO", collectionNode)
+                self.graph.create_unique(de_belongs_to_agg)
+                logger.debug('Created relation: ' + str(de_belongs_to_agg))
+        
+    def updateGraphAddingDefaultDiv(self, defaultDiv, smap):
+        if self.conf.dryrun:
+            print("add default div node to collection node")
+        else: 
+            agg = self._createUniqueNode("Aggregation", smap['name'], self.collPath, '', smap['type'])
+            
+            fileID = defaultDiv.fptr.field
+            filePaths = smap['filePaths']
+            path = filePaths[fileID]
+            
+            de = self._defineDigitalEntity(defaultDiv.format(), path, defaultDiv.type(), fileID)
+            
+            de_belongs_to_agg = Relationship(de, "BELONGS_TO", agg)
+            self.graph.create_unique(de_belongs_to_agg)
+            logger.debug('Created relation: ' + str(de_belongs_to_agg))
+        
+    def updateGraphDeletingDefaultDiv(self, defaultDiv):
+        if self.conf.dryrun:
+            print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
+        else:
+            nodeNme = defaultDiv.name
+            cypher = self.graph.cypher
+            cypher.execute("MATCH (n{name:name})-[r]-(m) WITH n, count((m)--()) AS mrel WHERE mrel = 1 DETACH DELETE m", name=nodeNme)
+            cypher.execute("MATCH (n{name:name}) DETACH DELETE n", name=nodeNme)
+            
+            #delete disconnected nodes
+#             MATCH (n)
+#             WHERE NOT (n)--()
+#             DELETE n
+#             
+#             #get all nodes with only one relation to the given node and detach delete them
+#             MATCH (n)-[r]-(m)
+#             WITH n, count((m)--()) AS mrel
+#             WHERE mrel = 1
+#             DETACH DELETE m
+#             
+#             #than detach delete the given node
+#             MATCH (n)
+#             DETACH DELETE n
+        
+    def updateGraphDeletingNodes(self, deletedDivs):
+        if self.conf.dryrun: 
+            print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
+        else: 
+            for divToDelete in deletedDivs: 
+                self.updateGraphDeletingDefaultDiv(divToDelete)
+    
 ################################################################################
 # Configuration Class #
 ################################################################################
@@ -469,7 +538,8 @@ class Configuration():
         """Parse the configuration file."""
 
         self.config = ConfigParser.RawConfigParser()
-        self.config.readfp(open(self.conffile))
+        with open(self.conffile, "r") as confFile:
+            self.config.readfp(confFile)
         
         logfilepath = self._getConfOption('Logging', 'log_file')
         loglevel = self._getConfOption('Logging', 'log_level')
@@ -523,33 +593,76 @@ class Configuration():
 ################################################################################
 
 def sync(args):
-
     configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
     configuration.parseConf();
+    
     gdbc = GraphDBClient(configuration, args.path)
-     
+    
     logger.info("Sync starting ...")
     mp = manifest.MetsParser(configuration, logger)
     logger.info("Reading METS manifest ...")
     irodsu = manifest.IRODSUtils(configuration.irods_home_dir, logger,
-                                 configuration.irods_debug)
+                             configuration.irods_debug)
+    if args.user:
+        logger.info('Working as user ' + args.user[0])
+        irodsu.setUser(args.user[0])
+    #get the 'old' manifest from the collection already puted into iRODS
     xmltext = irodsu.getFile(args.path + '/manifest.xml')
+    mets_from_old_manifest = CreateFromDocument(xmltext)
+    
     structuralMaps = mp.parse(xmltext)
     for smap in structuralMaps:
-        gdbc.push(smap)
+        if args.nmfile: 
+            # get the 'new' manifest with changes that will come by the put of collection
+            newxmltext = args.nmfile.read()
+            mets_from_new_manifest = CreateFromDocument(newxmltext)
+            
+            if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
+                metsComparator = MetsManifestComparator(configuration, logger)
+                diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
+                
+                for k, v in diff.iteritems():
+                    if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
+                        structMapDiff = v
+                        for key, val in structMapDiff.iteritems():
+                            #TODO: rename case of the collection
+                            if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
+                                addedDivs = val[MetsManifestComparator.ADDED_DIVS]
+                                gdbc.updateGraphAddingNodes(addedDivs, smap)
+                                
+                                deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
+                                gdbc.updateGraphDeletingNodes(deletedDivs)
+                            elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
+                                gdbc.updateGraphAddingDefaultDiv(val, smap)
+                            elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
+                                gdbc.updateGraphDeletingDefaultDiv(val)
+                            else:
+                                logger.info('ERROR: should not happen') 
+                    else:
+                        print("fileSec Changes not needed for now")
+                        
+                logger.info('Manifest comparison completed') 
+        else: 
+            gdbc.push(smap)
+    
     logger.info("Sync completed")
     
+    if args.user:
+        irodsu.unsetUser()
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='B2SAFE graphDB client')
-    parser.add_argument("confpath", help="path to the configuration file")
+    parser.add_argument("-confpath", help="path to the configuration file")
     parser.add_argument("-dbg", "--debug", action="store_true", 
                         help="enable debug")
     parser.add_argument("-d", "--dryrun", action="store_true",
                         help="run without performing any real change")
-    parser.add_argument("path", help="irods path to the data")
-
+    parser.add_argument("-path", help="irods path to the data")
+    
+    parser.add_argument("-u", "--user", nargs=1, help="irods user")
+    parser.add_argument("-nmf", "--nmfile", type=file, help="path to the new manifest.xml")
+    
     parser.set_defaults(func=sync) 
 
     args = parser.parse_args()
