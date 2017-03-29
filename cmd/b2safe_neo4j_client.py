@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*- 
 
 import argparse
-#import logging
-import logging.handlers
-import ConfigParser
-import manifest
-#import pprint
-import hashlib
-import requests
-import json
 import base64
+import hashlib
+import json
+import logging.handlers
 
-from compare_mets_manifests import MetsManifestComparator
 from py2neo import Graph, Node, Relationship, authenticate, GraphError
+import requests
+
+import ConfigParser
+from compare_mets_manifests import MetsManifestComparator
+import manifest
 from manifest.libmets import CreateFromDocument
 
+
+#import logging
+#import pprint
 logger = logging.getLogger('GraphDBClient')
 
 ##################################################
@@ -98,36 +100,37 @@ class GraphDBClient():
         num = self.conf.msg_buffer
         sub = self.conf.msg_subscription
         logger.info('Reading {} messages from subscription {}'.format(num,sub))
-        session = requests.Session()
-        payload = {'key': self.conf.msg_token}
-        endpoint = self.conf.msg_endpoint
-        headers = {'Content-Type': 'application/json'}
-        data = {'maxMessages': num}
-        postdata = json.dumps(data)
-        res = session.post(endpoint + '/subscriptions/' + sub.strip() + ':pull',
+        if sub is not None: 
+            session = requests.Session()
+            payload = {'key': self.conf.msg_token}
+            endpoint = self.conf.msg_endpoint
+            headers = {'Content-Type': 'application/json'}
+            data = {'maxMessages': num}
+            postdata = json.dumps(data)
+            res = session.post(endpoint + '/subscriptions/' + sub.strip() + ':pull',
                            data=postdata, headers=headers, params=payload)
-        logger.debug('Status code: {}'.format(str(res.status_code)))
-        logger.debug('Response: {}'.format(res.text))
-        res_dict = json.loads(res.text)
-        dataids = {'ackIds': []}
-        for rmessage in res_dict['receivedMessages']:
-            content = base64.standard_b64decode(rmessage['message']['data'])
-            metadata.update(self.msgToDict(content))
-            dataids['ackIds'].append(rmessage['ackId'])
-        logger.debug('Removing messages')
-        postdataids = json.dumps(dataids)
-        resids = session.post(endpoint + '/subscriptions/' + sub.strip()
+            logger.debug('Status code: {}'.format(str(res.status_code)))
+            logger.debug('Response: {}'.format(res.text))
+            res_dict = json.loads(res.text)
+            dataids = {'ackIds': []}
+            for rmessage in res_dict['receivedMessages']:
+                content = base64.standard_b64decode(rmessage['message']['data'])
+                metadata.update(self.msgToDict(content))
+                dataids['ackIds'].append(rmessage['ackId'])
+            logger.debug('Removing messages')
+            postdataids = json.dumps(dataids)
+            resids = session.post(endpoint + '/subscriptions/' + sub.strip()
                              + ':acknowledge', data=postdataids, headers=headers,
                              params=payload)
-        logger.debug('Status code: {}'.format(str(resids.status_code)))
-        logger.debug('Response: {}'.format(resids.text))
-
+            logger.debug('Status code: {}'.format(str(resids.status_code)))
+            logger.debug('Response: {}'.format(resids.text))
+        
         return metadata
 
 
     def msgToDict(self, message):
         """Transforms the message content to a dictionary"""
-        msg_dict = {}
+        #msg_dict = {}
         pair = message.split(":", 1)
         collection = pair[0].strip(" {")
         msg_dict = {collection: {}}
@@ -152,7 +155,7 @@ class GraphDBClient():
     def push(self, structuralMap):
         """It uploads new data to the graphDB"""
         logger.info('Start to upload the new metadata to the Graph DB')
-        structList = self._structRecursion(structuralMap)
+        self._structRecursion(structuralMap)
 
     def _structRecursion(self, d):
         """This is the main function responsible to read the manifest 
@@ -421,9 +424,8 @@ class GraphDBClient():
             # basing the search on the property which is unique: the name
             entity = self.graph.find_one(eudat_type, "name", name)
             if entity is None:
-                entity = entityNew  
-                #TODO: changed ask Claudio
-                self.graph.create(entity)
+                entity = entityNew
+            self.graph.create(entity)
             logger.debug('Entity created: ' + str(entity))
             return entity
 
@@ -447,73 +449,69 @@ class GraphDBClient():
 
         return pointer
     
-    def updateGraphAddingNodes(self, addetedDivs, collectionName, smap):
+    def updateGraphAddingNodes(self, addetedDivs, collectionName, filePaths):
         if self.conf.dryrun: 
             print("add nodes and relations to the aggregation node")
         else: 
-            collectionNode = self.graph.find_one("Aggregation", "name", collectionName)
+            collectionNodeName = self.collPath + ':' + collectionName
+            collectionNode = self.graph.find_one("Aggregation", "name", collectionNodeName)
             if collectionNode is None:
-                newCollectionNode = Node("Aggregation", location = '', name = collectionName, checksum = '', nodetype = 'entityRelation')
+                newCollectionNode = Node("Aggregation", location = '', name = collectionNodeName, checksum = '', nodetype = 'entityRelation')
                 self.graph.create(newCollectionNode)
                 collectionNode = newCollectionNode
             
-            filePaths = smap['filePaths']
-            for div in addetedDivs: 
-                fileID = div.fptr.field
-                path = filePaths[fileID]
-                
-                de = self._defineDigitalEntity(div.format(), path, div.type(), fileID)
-                
+            for key, div in addetedDivs.iteritems():
+                path = filePaths[key]
+                fileName = (path[0].replace("file://","")).replace(collectionName+'/',"")
+                de = self._defineDigitalEntity(div.LABEL, fileName, div.TYPE, key)
                 de_belongs_to_agg = Relationship(de, "BELONGS_TO", collectionNode)
                 self.graph.create_unique(de_belongs_to_agg)
                 logger.debug('Created relation: ' + str(de_belongs_to_agg))
         
-    def updateGraphAddingDefaultDiv(self, defaultDiv, smap):
+    def updateGraphAddingDefaultDiv(self, defaultDiv, smap, filePaths):
         if self.conf.dryrun:
             print("add default div node to collection node")
         else: 
             agg = self._createUniqueNode("Aggregation", smap['name'], self.collPath, '', smap['type'])
             
-            fileID = defaultDiv.fptr.field
-            filePaths = smap['filePaths']
-            path = filePaths[fileID]
-            
-            de = self._defineDigitalEntity(defaultDiv.format(), path, defaultDiv.type(), fileID)
-            
-            de_belongs_to_agg = Relationship(de, "BELONGS_TO", agg)
-            self.graph.create_unique(de_belongs_to_agg)
-            logger.debug('Created relation: ' + str(de_belongs_to_agg))
+            for fptr_elem in defaultDiv.fptr: 
+                fileId = fptr_elem.FILEID
+                path = filePaths[fileId]
+                fileName = (path[0].replace("file://","")).replace(smap['name'],"")
+                
+                de = self._defineDigitalEntity(defaultDiv.LABEL, fileName, defaultDiv.TYPE, fileId)
+                
+                de_belongs_to_agg = Relationship(de, "BELONGS_TO", agg)
+                self.graph.create_unique(de_belongs_to_agg)
+                logger.debug('Created relation: ' + str(de_belongs_to_agg))
         
-    def updateGraphDeletingDefaultDiv(self, defaultDiv):
+    def updateGraphDeletingDefaultDiv(self, defaultDiv, smap, filePaths):
         if self.conf.dryrun:
             print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
         else:
-            nodeNme = defaultDiv.name
-            cypher = self.graph.cypher
-            cypher.execute("MATCH (n{name:name})-[r]-(m) WITH n, count((m)--()) AS mrel WHERE mrel = 1 DETACH DELETE m", name=nodeNme)
-            cypher.execute("MATCH (n{name:name}) DETACH DELETE n", name=nodeNme)
+            for fptr_elem in defaultDiv.fptr: 
+                nodeName = fptr_elem.FILEID
+                cypher = self.graph.cypher
+                cypher.execute("MATCH (n{name:{nName}})-[r]-(m)-[t]-(x) WITH n, m, count(t)+1 AS mrel WHERE mrel = 1 DETACH DELETE m", {"nName":str(nodeName)})
+                cypher.execute("MATCH (n{name:{nName}}) DETACH DELETE n", {"nName":str(nodeName)})
             
-            #delete disconnected nodes
-#             MATCH (n)
-#             WHERE NOT (n)--()
-#             DELETE n
+#           #delete disconnected nodes
+#           MATCH (n) WHERE NOT (n)--() DELETE n
 #             
-#             #get all nodes with only one relation to the given node and detach delete them
-#             MATCH (n)-[r]-(m)
-#             WITH n, count((m)--()) AS mrel
-#             WHERE mrel = 1
-#             DETACH DELETE m
+#           #get all nodes with only one relation to the given node and detach delete them
+#           MATCH (n)-[r]-(m) WITH n, m count((m)--()) AS mrel WHERE mrel = 1 DETACH DELETE m
 #             
-#             #than detach delete the given node
-#             MATCH (n)
-#             DETACH DELETE n
+#           #than detach delete the given node
+#           MATCH (n) DETACH DELETE n
         
-    def updateGraphDeletingNodes(self, deletedDivs):
+    def updateGraphDeletingNodes(self, deletedDivs, smap, filePaths):
         if self.conf.dryrun: 
             print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
         else: 
-            for divToDelete in deletedDivs: 
-                self.updateGraphDeletingDefaultDiv(divToDelete)
+            for nodeName, divToDelete in deletedDivs.iteritems(): 
+                cypher = self.graph.cypher
+                cypher.execute("MATCH (n{name:{nName}})-[r]-(m)-[t]-(x) WITH n, m, count(t)+1 AS mrel WHERE mrel = 1 DETACH DELETE m", {"nName":str(nodeName)})
+                cypher.execute("MATCH (n{name:{nName}}) DETACH DELETE n", {"nName":str(nodeName)})
     
 ################################################################################
 # Configuration Class #
@@ -591,6 +589,24 @@ class Configuration():
 ################################################################################
 # B2SAFE GraphDB client Command Line Interface #
 ################################################################################
+def getFilePathMapFrom(smap):
+    filePaths = {}
+    for obj in smap['nestedObjects']:
+        if len(obj['nestedObjects']) > 0 :
+            getFilePathMapRecursively(obj['nestedObjects'], filePaths)
+        else:
+            for fileId, path in obj['filePaths'].iteritems():
+                filePaths[fileId] = path
+    
+    return filePaths
+    
+def getFilePathMapRecursively(nestedObjectsList, filePaths):
+    for obj in nestedObjectsList:
+        if len(obj['nestedObjects']) > 0 :
+            getFilePathMapRecursively(obj['nestedObjects'], filePaths)
+        else:
+            for fileId, path in obj['filePaths'].iteritems():
+                filePaths[fileId] = path
 
 def sync(args):
     configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
@@ -606,42 +622,62 @@ def sync(args):
     if args.user:
         logger.info('Working as user ' + args.user[0])
         irodsu.setUser(args.user[0])
+    
     #get the 'old' manifest from the collection already puted into iRODS
     xmltext = irodsu.getFile(args.path + '/manifest.xml')
     mets_from_old_manifest = CreateFromDocument(xmltext)
     
     structuralMaps = mp.parse(xmltext)
-    for smap in structuralMaps:
+    for smapName, smap in structuralMaps.iteritems():
         if args.nmfile: 
             # get the 'new' manifest with changes that will come by the put of collection
             newxmltext = args.nmfile.read()
+            if newxmltext is None:
+                logger.error('new manifest.xml file not found')
+                break
+            
             mets_from_new_manifest = CreateFromDocument(newxmltext)
+            newStructuralMaps = mp.parse(newxmltext)
+            if not newStructuralMaps:
+                logger.error('no strucktMap in new manifest.xml found')
+                break
             
             if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
                 metsComparator = MetsManifestComparator(configuration, logger)
                 diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
+                
+                newSmap = newStructuralMaps[smapName]
+                if newSmap is None:
+                    logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
+                    break
+                newFilePathMap = getFilePathMapFrom(newSmap)
+                oldFilePathMap = getFilePathMapFrom(smap)
                 
                 for k, v in diff.iteritems():
                     if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
                         structMapDiff = v
                         for key, val in structMapDiff.iteritems():
                             #TODO: rename case of the collection
+                            collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
+                            
                             if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
                                 addedDivs = val[MetsManifestComparator.ADDED_DIVS]
-                                gdbc.updateGraphAddingNodes(addedDivs, smap)
+                                gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
                                 
                                 deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
-                                gdbc.updateGraphDeletingNodes(deletedDivs)
+                                gdbc.updateGraphDeletingNodes(deletedDivs, smap, oldFilePathMap)
                             elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphAddingDefaultDiv(val, smap)
+                                gdbc.updateGraphAddingDefaultDiv(val, newSmap, newFilePathMap)
                             elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphDeletingDefaultDiv(val)
+                                gdbc.updateGraphDeletingDefaultDiv(val, smap, oldFilePathMap)
                             else:
-                                logger.info('ERROR: should not happen') 
+                                logger.info('ERROR: should not happen, unknown key in the diff map') 
                     else:
                         print("fileSec Changes not needed for now")
                         
-                logger.info('Manifest comparison completed') 
+                logger.info('Manifest comparison completed')
+            else:
+                logger.error('Manifest comparison not done, because one of manifest files was not found')            
         else: 
             gdbc.push(smap)
     
@@ -664,6 +700,6 @@ if __name__ == "__main__":
     parser.add_argument("-nmf", "--nmfile", type=file, help="path to the new manifest.xml")
     
     parser.set_defaults(func=sync) 
-
+    
     args = parser.parse_args()
     args.func(args)

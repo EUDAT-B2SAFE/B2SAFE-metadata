@@ -241,7 +241,8 @@ class MetsManifest():
                 hashDivRel = hashlib.md5(stringPathList.strip()).hexdigest()
             else:
                 hashDivRel = ind
-            divRel.LABEL = 'rel_' + rootName + '_' + hashDivRel
+            #divRel.LABEL = 'rel_' + rootName + '_' + hashDivRel
+            divRel.LABEL = 'rel_' + rootName
             relDict[normPath] = divRel
         # if this entity does not provide its own relations, check if 
         # is related to previously defined entities.

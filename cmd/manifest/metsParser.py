@@ -119,7 +119,7 @@ class MetsParser(object):
                                          + (mets.toxml("utf-8",
                                                        element_name='mets'))))
         groups = self._parseFileGrpType(mets.fileSec.fileGrp)
-        collMaps = []
+        collMaps = {}
         for smap in mets.structMap:
             name = smap.div.LABEL
             if smap.div.LABEL is None:
@@ -130,7 +130,7 @@ class MetsParser(object):
             for fptr_element in smap.div.fptr:
                 self.logger.debug('FPTR: ' + fptr_element.FILEID)
                 pathList = self._pathListExtractor(fptr_element.FILEID,
-                                                   fileGroups)
+                                                   mets.fileSec.fileGrp)
                 filePaths += pathList
 
             collectionMap = {'name': name,
@@ -139,7 +139,7 @@ class MetsParser(object):
                              'nestedObjects': collectionObjs}
             self.logger.debug('Structural map: '
                               + pprint.pformat(collectionMap))
-            collMaps.append(collectionMap)
+            collMaps[name] = collectionMap
 
         return collMaps
 

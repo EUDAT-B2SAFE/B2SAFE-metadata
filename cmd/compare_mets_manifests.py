@@ -3,9 +3,9 @@
 
 #import argparse
 #import json
-import logging
 #import os
 #import sys
+import logging
 import pprint
 import collections
 import xml.dom.minidom
@@ -75,6 +75,131 @@ class MetsManifestComparator():
         
         return changes
 
+    def compareStructMapInfo(self, oldStructMap, newStructMap):
+        oldlLogicalCollections = {}
+        oldDefaultDivs = {}
+         
+        self.contentsFromStructMap(oldStructMap, oldlLogicalCollections, oldDefaultDivs)
+
+        newLogicalCollections = {}
+        newDefaultDivs = {}
+        
+        self.contentsFromStructMap(newStructMap, newLogicalCollections, newDefaultDivs)
+         
+        changes = {}        
+        self.createChangesFromLogicalCollections(oldlLogicalCollections, newLogicalCollections, changes)
+        self.logger.debug('Changes related to logical collections: ' + pprint.pformat(changes))
+        self.createChangesFromDefaultDivs(oldDefaultDivs, newDefaultDivs, changes)
+        self.logger.debug('Changes related to default divs: ' + pprint.pformat(changes))
+        
+        return changes
+    
+    def contentsFromStructMap(self, oldStructMap, oldlLogicalCollections, oldDefaultDivs):
+        for smap in oldStructMap:
+            mainDiv = smap.div
+            for innerDiv in mainDiv.content() :
+                if innerDiv.TYPE == "entityRelation":
+                    #name = self.getCollectionNameFrom(innerDiv.LABEL)
+                    name = innerDiv.LABEL
+                    oldlLogicalCollections[name] = innerDiv
+                else:
+                    oldDefaultDivs[self.createIdFrom(innerDiv)] = innerDiv
+
+    def createIdFrom(self, div):
+        fptr_id = ""
+        if len(div.fptr) == 1:
+            for fptr_element in div.fptr:
+                fptr_id = fptr_element.FILEID
+        else:
+            print "Could not extract div id from div: "+ div.LABEL
+        return fptr_id
+    
+    def getCollectionNameFrom(self, label):
+        li = label.split('_')
+        collectionName = ""
+        for x in range(0, len(li)-1):
+            if collectionName == "":
+                collectionName = li[x]
+            else:
+                collectionName = collectionName + '_' + li[x]
+        return collectionName
+    
+    def createChangesFromLogicalCollections(self, oldlLogicalCollections, newLogicalCollections, changes):
+        deletedLogCollections = oldlLogicalCollections.keys()
+       
+        for key in newLogicalCollections.keys():
+            if key not in oldlLogicalCollections.keys():
+                changes[self.ADDED_LOGICAL_COLLECTION+key] = newLogicalCollections[key]
+                #create node for collection _createUniqueNode Aggregation
+            else:
+                deletedLogCollections.remove(key)
+                self.createChangesForCollection(oldlLogicalCollections[key], newLogicalCollections[key], changes)
+        
+        for key in deletedLogCollections:
+            #for deletedDivs DETACH DELETE n, Delete a node and all relationships connected to it.
+            changes[self.DELETED_LOGICAL_COLLECTION+key] = oldlLogicalCollections[key]
+    
+    def createChangesForCollection(self, oldlLogicalCollection, newLogicalCollection, changes):
+        oldMap = self.createMapFromDiv(oldlLogicalCollection)
+        newMap = self.createMapFromDiv(newLogicalCollection)
+        
+        deletedDivkeys = oldMap.keys()
+        
+        addedDivs = {}
+        deletedDivs = {}
+        for key in newMap.keys():
+            if key not in oldMap.keys():
+                addedDivs[key] = newMap[key]
+            else:
+                deletedDivkeys.remove(key)
+        
+        for key in deletedDivkeys:
+            deletedDivs[key] = oldMap[key]
+        
+        innerChanges = {}
+        innerChanges[self.ADDED_DIVS] = addedDivs
+        innerChanges[self.DELETED_DIVS] = deletedDivs
+        #name = self.getCollectionNameFrom(oldlLogicalCollection.LABEL)
+        name = oldlLogicalCollection.LABEL
+        changes[self.LOGICAL_COLLECTION_CHANGE+name] = innerChanges
+    
+    def createMapFromDiv(self, div):
+        mapFromDiv = {}
+        for entry in div.content():
+            if type(entry) == divType:
+                mapFromDiv[self.createIdFrom(entry)] = entry
+            else:
+                print "Invalid format"
+        
+        return mapFromDiv
+
+    def createChangesFromDefaultDivs(self, oldDefaultDivs, newDefaultDivs, changes):
+        deletedDivIds = oldDefaultDivs.keys()
+        
+        for newkey in newDefaultDivs.keys():
+            if newkey not in oldDefaultDivs.keys():
+                changes[self.ADDED_DEFAULT_DIV+newkey] = newDefaultDivs[newkey]
+            else:
+                deletedDivIds.remove(newkey)
+        
+        for key in deletedDivIds:
+            changes[self.DELETED_DEFAULT_DIV+key] = oldDefaultDivs[key]
+
+    def leafToString(self, d):
+        for k, v in d.iteritems():
+            if isinstance(v, collections.Mapping):
+                r = self.leafToString(v)
+                d[k] = r
+            elif (isinstance(v, fileGrpType)
+                  or isinstance(v, fileType)
+                  or isinstance(v, divType)):
+                dom = xml.dom.minidom.parseString(v.toxml("utf-8"))
+                d[k] = dom.toxml("utf-8")
+            else:
+                d[k] = str(v)
+        return d
+    
+    
     def compareFileSecInfo(self, oldFileSec, newFileSec):
         oldFilesAndDirectories = self.getFilesAndDirectories(oldFileSec.fileGrp)
         newFilesAndDirectories = self.getFilesAndDirectories(newFileSec.fileGrp)
@@ -159,118 +284,6 @@ class MetsManifestComparator():
                     self.recursiveGetFilesAndFolders(entry, directories, files)
             else:
                 print "EROR: unknown mets element found"
-
-
-    def compareStructMapInfo(self, oldStructMap, newStructMap):
-        oldlLogicalCollections = {}
-        oldDefaultDivs = {}
-         
-        self.contentsFromStructMap(oldStructMap, oldlLogicalCollections, oldDefaultDivs)
-
-        newLogicalCollections = {}
-        newDefaultDivs = {}
-        
-        self.contentsFromStructMap(newStructMap, newLogicalCollections, newDefaultDivs)
-         
-        changes = {}        
-        self.createChangesFromLogicalCollections(oldlLogicalCollections, newLogicalCollections, changes)
-        self.logger.debug('Changes related to logical collections: ' + pprint.pformat(changes))
-        self.createChangesFromDefaultDivs(oldDefaultDivs, newDefaultDivs, changes)
-        self.logger.debug('Changes related to default divs: ' + pprint.pformat(changes))
-        
-        return changes
-    
-    def contentsFromStructMap(self, oldStructMap, oldlLogicalCollections, oldDefaultDivs):
-        for smap in oldStructMap:
-            mainDiv = smap.div
-            for innerDiv in mainDiv.content() :
-                if innerDiv.TYPE == "entityRelation":
-                    oldlLogicalCollections[innerDiv.LABEL] = innerDiv
-                else:
-                    oldDefaultDivs[self.createIdFrom(innerDiv)] = innerDiv
-
-    def createIdFrom(self, div):
-        fptr_id = ""
-        if len(div.fptr) == 1:
-            for fptr_element in div.fptr:
-                fptr_id = fptr_element.FILEID
-        else:
-            print "Could not extract div id from div: "+ div.LABEL
-        return fptr_id
-    
-    def createChangesFromLogicalCollections(self, oldlLogicalCollections, newLogicalCollections, changes):
-        deletedLogCollections = oldlLogicalCollections.keys()
-       
-        for key in newLogicalCollections.keys():
-            if key not in oldlLogicalCollections.keys():
-                changes[self.ADDED_LOGICAL_COLLECTION+key] = newLogicalCollections[key]
-                #create node for collection _createUniqueNode Aggregation
-            else:
-                deletedLogCollections.remove(key)
-                self.createChangesForCollection(oldlLogicalCollections[key], newLogicalCollections[key], changes)
-        
-        for key in deletedLogCollections:
-            #for deletedDivs DETACH DELETE n, Delete a node and all relationships connected to it.
-            changes[self.DELETED_LOGICAL_COLLECTION+key] = oldlLogicalCollections[key]
-    
-    def createChangesForCollection(self, oldlLogicalCollection, newLogicalCollection, changes):
-        oldMap = self.createMapFromDiv(oldlLogicalCollection)
-        newMap = self.createMapFromDiv(newLogicalCollection)
-        
-        deletedDivkeys = oldMap.keys()
-        
-        addedDivs = {}
-        deletedDivs = {}
-        for key in newMap.keys():
-            if key not in oldMap.keys():
-                addedDivs[key] = newMap[key]
-            else:
-                deletedDivkeys.remove(key)
-        
-        for key in deletedDivkeys:
-            deletedDivs[key] = oldMap[key]
-        
-        innerChanges = {}
-        innerChanges[self.ADDED_DIVS] = addedDivs
-        innerChanges[self.DELETED_DIVS] = deletedDivs
-        changes[self.LOGICAL_COLLECTION_CHANGE+oldlLogicalCollection.LABEL] = innerChanges
-    
-    def createMapFromDiv(self, div):
-        mapFromDiv = {}
-        for entry in div.content():
-            if type(entry) == divType:
-                mapFromDiv[self.createIdFrom(entry)] = entry
-            else:
-                print "Invalid format"
-        
-        return mapFromDiv
-
-    def createChangesFromDefaultDivs(self, oldDefaultDivs, newDefaultDivs, changes):
-        deletedDivIds = oldDefaultDivs.keys()
-        
-        for newkey in newDefaultDivs.keys():
-            if newkey not in oldDefaultDivs.keys():
-                changes[self.ADDED_DEFAULT_DIV+newkey] = newDefaultDivs[newkey]
-            else:
-                deletedDivIds.remove(newkey)
-        
-        for key in deletedDivIds:
-            changes[self.DELETED_DEFAULT_DIV+key] = oldDefaultDivs[key]
-
-    def leafToString(self, d):
-        for k, v in d.iteritems():
-            if isinstance(v, collections.Mapping):
-                r = self.leafToString(v)
-                d[k] = r
-            elif (isinstance(v, fileGrpType)
-                  or isinstance(v, fileType)
-                  or isinstance(v, divType)):
-                dom = xml.dom.minidom.parseString(v.toxml("utf-8"))
-                d[k] = dom.toxml("utf-8")
-            else:
-                d[k] = str(v)
-        return d
-
 
 # def sync(args):
 # 
