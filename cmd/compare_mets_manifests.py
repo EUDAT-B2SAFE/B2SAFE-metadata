@@ -1,30 +1,12 @@
 #!/usr/bin/env python 
 # -*- coding: utf-8 -*-
 
-#import argparse
-#import json
-#import os
-#import sys
 import logging
 import pprint
 import collections
 import xml.dom.minidom
 
 from manifest.libmets import fileGrpType, fileType, divType
-#from manifest.libmets import fileGrpType, fileType, CreateFromDocument, divType
-#from manifest import IRODSUtils
-
-# logger = logging.getLogger('MetsManifestComparator')
-# logger.setLevel(logging.INFO)
-# logfilepath = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), 
-#                            'manifestComparator.log')
-# rfh = logging.handlers.RotatingFileHandler(logfilepath, \
-#                                            maxBytes=10000000, \
-#                                            backupCount=10)
-# formatter = logging.Formatter('%(asctime)s %(levelname)s: '
-#                               + '[%(funcName)s] %(message)s')
-# rfh.setFormatter(formatter)
-# logger.addHandler(rfh)
 
 
 ################################################################################
@@ -33,7 +15,7 @@ from manifest.libmets import fileGrpType, fileType, divType
 class MetsManifestComparator():
 
     STRUCT_MAP_CHANGES = "STRUCT_MAP_CHANGES"
-    FILE_SEC_CHANGES = "FILE_SEC_CHANGES"
+#    FILE_SEC_CHANGES = "FILE_SEC_CHANGES"
     
     ADDED_LOGICAL_COLLECTION = "added_new_logical_collection_"
     DELETED_LOGICAL_COLLECTION = "deleted_logical_collection_"
@@ -78,15 +60,15 @@ class MetsManifestComparator():
     def compareStructMapInfo(self, oldStructMap, newStructMap):
         oldlLogicalCollections = {}
         oldDefaultDivs = {}
-         
+        
         self.contentsFromStructMap(oldStructMap, oldlLogicalCollections, oldDefaultDivs)
 
         newLogicalCollections = {}
         newDefaultDivs = {}
         
         self.contentsFromStructMap(newStructMap, newLogicalCollections, newDefaultDivs)
-         
-        changes = {}        
+        
+        changes = {}
         self.createChangesFromLogicalCollections(oldlLogicalCollections, newLogicalCollections, changes)
         self.logger.debug('Changes related to logical collections: ' + pprint.pformat(changes))
         self.createChangesFromDefaultDivs(oldDefaultDivs, newDefaultDivs, changes)
@@ -104,7 +86,7 @@ class MetsManifestComparator():
                     oldlLogicalCollections[name] = innerDiv
                 else:
                     oldDefaultDivs[self.createIdFrom(innerDiv)] = innerDiv
-
+    
     def createIdFrom(self, div):
         fptr_id = ""
         if len(div.fptr) == 1:
@@ -126,7 +108,6 @@ class MetsManifestComparator():
     
     def createChangesFromLogicalCollections(self, oldlLogicalCollections, newLogicalCollections, changes):
         deletedLogCollections = oldlLogicalCollections.keys()
-       
         for key in newLogicalCollections.keys():
             if key not in oldlLogicalCollections.keys():
                 changes[self.ADDED_LOGICAL_COLLECTION+key] = newLogicalCollections[key]
@@ -142,7 +123,6 @@ class MetsManifestComparator():
     def createChangesForCollection(self, oldlLogicalCollection, newLogicalCollection, changes):
         oldMap = self.createMapFromDiv(oldlLogicalCollection)
         newMap = self.createMapFromDiv(newLogicalCollection)
-        
         deletedDivkeys = oldMap.keys()
         
         addedDivs = {}
@@ -159,9 +139,7 @@ class MetsManifestComparator():
         innerChanges = {}
         innerChanges[self.ADDED_DIVS] = addedDivs
         innerChanges[self.DELETED_DIVS] = deletedDivs
-        #name = self.getCollectionNameFrom(oldlLogicalCollection.LABEL)
-        name = oldlLogicalCollection.LABEL
-        changes[self.LOGICAL_COLLECTION_CHANGE+name] = innerChanges
+        changes[self.LOGICAL_COLLECTION_CHANGE+oldlLogicalCollection.LABEL] = innerChanges
     
     def createMapFromDiv(self, div):
         mapFromDiv = {}
@@ -198,7 +176,6 @@ class MetsManifestComparator():
             else:
                 d[k] = str(v)
         return d
-    
     
     def compareFileSecInfo(self, oldFileSec, newFileSec):
         oldFilesAndDirectories = self.getFilesAndDirectories(oldFileSec.fileGrp)
@@ -249,7 +226,6 @@ class MetsManifestComparator():
         
         fileSecChanges["added directories:"] = addedDirectories
         fileSecChanges["deleted directories:"] = deletedDirectories
-        
 
     def getFilesAndDirectories(self, groups):
         resultDict = {}
@@ -284,55 +260,3 @@ class MetsManifestComparator():
                     self.recursiveGetFilesAndFolders(entry, directories, files)
             else:
                 print "EROR: unknown mets element found"
-
-# def sync(args):
-# 
-#     logger.info ('Starting manifest comparison')
-#     if args.filesystem:
-#         with open(args.omfile, "r") as oldMfFile:
-#             xmltext = oldMfFile.read()
-#             mets_from_old_manifest = CreateFromDocument(xmltext)
-#         with open(args.nmfile, "r") as newMfFile:
-#             newxmltext = newMfFile.read()
-#             mets_from_new_manifest = CreateFromDocument(newxmltext)
-#     else:
-#         irodsu = IRODSUtils('/', logger)
-#         if args.user:
-#             logger.info('Working as user ' + args.user[0])
-#             irodsu.setUser(args.user[0])
-#         xmltext = irodsu.getFile(args.omfile)
-#         mets_from_old_manifest = CreateFromDocument(xmltext)
-#         newxmltext = irodsu.getFile(args.nmfile)
-#         mets_from_new_manifest = CreateFromDocument(newxmltext)
-#         irodsu.unsetUser()
-# 
-#     metsComparator = MetsManifestComparator(args.debug, args.dryrun, logger)
-#     diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
-#     res = metsComparator.leafToString(diff)
-# 
-#     with open('mets.diff', "w+") as metsDiff:
-#         logger.info ('Writing results to the file mets.diff')
-#         metsDiff.write(json.dumps(res, indent=4))
-#     logger.info('Manifest comparison completed') 
-# 
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser(description='B2SAFE graphDB updater')
-#     parser.add_argument("-dbg", "--debug", action="store_true", 
-#                         help="enable debug")
-#     parser.add_argument("-d", "--dryrun", action="store_true",
-#                         help="run without performing any real change")
-#     parser.add_argument("-u", "--user", nargs=1, help="irods user")
-# 
-#     input_group = parser.add_mutually_exclusive_group(required=True)
-#     input_group.add_argument("-i", "--irods", action="store_true", 
-#                              help="irods path")
-#     input_group.add_argument("-f", "--filesystem", action="store_true", 
-#                              help="fs path")
-#     
-#     parser.add_argument("omfile", help="path to the old manifest.xml")
-#     parser.add_argument("nmfile", help="path to the new manifest.xml")
-#     
-#     parser.set_defaults(func=sync) 
-# 
-#     args = parser.parse_args()
-#     args.func(args)

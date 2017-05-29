@@ -6,7 +6,10 @@ import base64
 import hashlib
 import json
 import logging.handlers
+import pyxb
+import traceback
 
+from xml import sax
 from py2neo import Graph, Node, Relationship, authenticate, GraphError
 import requests
 
@@ -626,66 +629,73 @@ def sync(args):
         irodsu.setUser(args.user[0])
     
     #get the 'old' manifest from the collection already puted into iRODS
-    xmltext = irodsu.getFile(args.path + '/manifest.xml')
+    xmltext = irodsu.getFile(args.path + '/manifest.xml') 
     if xmltext is None:
         logger.error('manifest.xml file not found')
     
-    structuralMaps = mp.parse(xmltext)
-    for smapName, smap in structuralMaps.iteritems():
-        
-        oldXMLtext = irodsu.getFile(args.path + '/manifest.xml.old')
-        if oldXMLtext: 
-            mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
-            mets_from_new_manifest = CreateFromDocument(xmltext)
-            oldStructuralMaps = mp.parse(oldXMLtext)
-            if not oldStructuralMaps:
-                logger.error('no strucktMap in new manifest.xml found')
-                break
-            
-            if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
-                metsComparator = MetsManifestComparator(configuration, logger)
-                diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
-                
-                oldSmap = oldStructuralMaps[smapName]
-                if oldSmap is None:
-                    logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
+    
+    try:
+        structuralMaps = mp.parse(xmltext)
+        for smapName, smap in structuralMaps.iteritems():
+            oldXMLtext = irodsu.getFile(args.path + '/manifest.xml.old')
+            if oldXMLtext: 
+                mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
+                mets_from_new_manifest = CreateFromDocument(xmltext)
+                oldStructuralMaps = mp.parse(oldXMLtext)
+                if not oldStructuralMaps:
+                    logger.error('no strucktMap in new manifest.xml found')
                     break
-                newFilePathMap = getFilePathMapFrom(smap)
-                oldFilePathMap = getFilePathMapFrom(oldSmap)
                 
-                for k, v in diff.iteritems():
-                    if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
-                        structMapDiff = v
-                        for key, val in structMapDiff.iteritems():
-                            #TODO: rename case of the collection
-                            collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
-                            
-                            if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
-                                addedDivs = val[MetsManifestComparator.ADDED_DIVS]
-                                gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
+                if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
+                    metsComparator = MetsManifestComparator(configuration, logger)
+                    diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
+                    
+                    oldSmap = oldStructuralMaps[smapName]
+                    if oldSmap is None:
+                        logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
+                        break
+                    newFilePathMap = getFilePathMapFrom(smap)
+                    oldFilePathMap = getFilePathMapFrom(oldSmap)
+                    
+                    for k, v in diff.iteritems():
+                        if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
+                            structMapDiff = v
+                            for key, val in structMapDiff.iteritems():
+                                #TODO: rename case of the collection
+                                collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
                                 
-                                deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
-                                gdbc.updateGraphDeletingNodes(deletedDivs, oldSmap, oldFilePathMap)
-                            elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
-                            elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphDeletingDefaultDiv(val, oldSmap, oldFilePathMap)
-                            else:
-                                logger.info('ERROR: should not happen, unknown key in the diff map') 
-                    else:
-                        print("fileSec Changes not needed for now")
-                        
-                logger.info('Manifest comparison completed')
-            else:
-                logger.error('Manifest comparison not done, because one of manifest files was not found')            
-        else: 
-            gdbc.push(smap)
+                                if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
+                                    addedDivs = val[MetsManifestComparator.ADDED_DIVS]
+                                    gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
+                                    
+                                    deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
+                                    gdbc.updateGraphDeletingNodes(deletedDivs, oldSmap, oldFilePathMap)
+                                elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
+                                    gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
+                                elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
+                                    gdbc.updateGraphDeletingDefaultDiv(val, oldSmap, oldFilePathMap)
+                                else:
+                                    logger.info('ERROR: should not happen, unknown key in the diff map') 
+                        else:
+                            print("fileSec Changes not needed for now")
+                            
+                    logger.info('Manifest comparison completed')
+                else:
+                    logger.error('Manifest comparison not done, because one of manifest files was not found')            
+            else: 
+                gdbc.push(smap)
+        
+        logger.info("Sync completed")
+        
+        if args.user:
+            irodsu.unsetUser()
+    except pyxb.exceptions_.UnrecognizedContentError:
+        logger.error("UnrecognizedContentError: "+traceback.format_exc())
+    except sax._exceptions.SAXParseException:
+        logger.error("SAXParseException: "+traceback.format_exc())
+    except:
+        logger.error(traceback.format_exc())
     
-    logger.info("Sync completed")
-    
-    if args.user:
-        irodsu.unsetUser()
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='B2SAFE graphDB client')
