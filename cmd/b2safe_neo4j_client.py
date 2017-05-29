@@ -492,7 +492,9 @@ class GraphDBClient():
             for fptr_elem in defaultDiv.fptr: 
                 nodeName = fptr_elem.FILEID
                 cypher = self.graph.cypher
+                #get all nodes with only one relation to the given node and detach delete them
                 cypher.execute("MATCH (n{name:{nName}})-[r]-(m)-[t]-(x) WITH n, m, count(t)+1 AS mrel WHERE mrel = 1 DETACH DELETE m", {"nName":str(nodeName)})
+                #than detach delete the given node
                 cypher.execute("MATCH (n{name:{nName}}) DETACH DELETE n", {"nName":str(nodeName)})
             
 #           #delete disconnected nodes
@@ -625,20 +627,18 @@ def sync(args):
     
     #get the 'old' manifest from the collection already puted into iRODS
     xmltext = irodsu.getFile(args.path + '/manifest.xml')
-    mets_from_old_manifest = CreateFromDocument(xmltext)
+    if xmltext is None:
+        logger.error('manifest.xml file not found')
     
     structuralMaps = mp.parse(xmltext)
     for smapName, smap in structuralMaps.iteritems():
-        if args.nmfile: 
-            # get the 'new' manifest with changes that will come by the put of collection
-            newxmltext = args.nmfile.read()
-            if newxmltext is None:
-                logger.error('new manifest.xml file not found')
-                break
-            
-            mets_from_new_manifest = CreateFromDocument(newxmltext)
-            newStructuralMaps = mp.parse(newxmltext)
-            if not newStructuralMaps:
+        
+        oldXMLtext = irodsu.getFile(args.path + '/manifest.xml.old')
+        if oldXMLtext: 
+            mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
+            mets_from_new_manifest = CreateFromDocument(xmltext)
+            oldStructuralMaps = mp.parse(oldXMLtext)
+            if not oldStructuralMaps:
                 logger.error('no strucktMap in new manifest.xml found')
                 break
             
@@ -646,12 +646,12 @@ def sync(args):
                 metsComparator = MetsManifestComparator(configuration, logger)
                 diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
                 
-                newSmap = newStructuralMaps[smapName]
-                if newSmap is None:
+                oldSmap = oldStructuralMaps[smapName]
+                if oldSmap is None:
                     logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
                     break
-                newFilePathMap = getFilePathMapFrom(newSmap)
-                oldFilePathMap = getFilePathMapFrom(smap)
+                newFilePathMap = getFilePathMapFrom(smap)
+                oldFilePathMap = getFilePathMapFrom(oldSmap)
                 
                 for k, v in diff.iteritems():
                     if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
@@ -665,11 +665,11 @@ def sync(args):
                                 gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
                                 
                                 deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
-                                gdbc.updateGraphDeletingNodes(deletedDivs, smap, oldFilePathMap)
+                                gdbc.updateGraphDeletingNodes(deletedDivs, oldSmap, oldFilePathMap)
                             elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphAddingDefaultDiv(val, newSmap, newFilePathMap)
+                                gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
                             elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
-                                gdbc.updateGraphDeletingDefaultDiv(val, smap, oldFilePathMap)
+                                gdbc.updateGraphDeletingDefaultDiv(val, oldSmap, oldFilePathMap)
                             else:
                                 logger.info('ERROR: should not happen, unknown key in the diff map') 
                     else:
@@ -697,7 +697,6 @@ if __name__ == "__main__":
     parser.add_argument("-path", help="irods path to the data")
     
     parser.add_argument("-u", "--user", nargs=1, help="irods user")
-    parser.add_argument("-nmf", "--nmfile", type=file, help="path to the new manifest.xml")
     
     parser.set_defaults(func=sync) 
     
