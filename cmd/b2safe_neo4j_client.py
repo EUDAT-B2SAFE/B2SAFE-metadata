@@ -155,12 +155,12 @@ class GraphDBClient():
 
 # dynamic data ###################################
 
-    def push(self, structuralMap):
+    def push(self, structuralMap, collPath):
         """It uploads new data to the graphDB"""
         logger.info('Start to upload the new metadata to the Graph DB')
-        self._structRecursion(structuralMap)
+        self._structRecursion(structuralMap, collPath)
 
-    def _structRecursion(self, d):
+    def _structRecursion(self, d, collPath):
         """This is the main function responsible to read the manifest 
            dictionary in input and create the graph as result.
         """
@@ -171,11 +171,12 @@ class GraphDBClient():
             # It should happen just once, for the root collection,
             # the only one of the type 'digitalCollection'
             if (d['type'] == 'digitalCollection'):
-                path = self.collPath
+                path = collPath
             else:
                 path = ''
-                d['name'] = self.collPath + ':' + d['name']
+                d['name'] = collPath + ':' + d['name']
             sumValue = ''
+            
             agg = self._createUniqueNode("Aggregation", d['name'],
                                                         path,
                                                         sumValue,
@@ -200,7 +201,7 @@ class GraphDBClient():
                     logger.warning('multiple file paths not allowed')
             # check the nested objects in a recursive way
             for elem in d['nestedObjects']:
-                nodes = self._structRecursion(elem)
+                nodes = self._structRecursion(elem, collPath)
                 for n in nodes:
                     if self.conf.dryrun:
                         print ("create the graph relation ["+str(n)+","
@@ -222,13 +223,14 @@ class GraphDBClient():
                         leafs.append(de)
             # if there is not a path, the leaf is an aggregation, even if an empty one.
             else:
-                path = ''
-                sumValue = ''
-                agg = self._createUniqueNode("Aggregation", d['name'],
-                                                            path[7:],
-                                                            sumValue,
-                                                            d['type'])
-                leafs.append(agg)
+                if len(d['linkedMets']) == 0: 
+                    path = ''
+                    sumValue = ''
+                    agg = self._createUniqueNode("Aggregation", d['name'],
+                                                                path[7:],
+                                                                sumValue,
+                                                                d['type'])
+                    leafs.append(agg)
 
             return leafs
      
@@ -428,10 +430,18 @@ class GraphDBClient():
             entity = self.graph.find_one(eudat_type, "name", name)
             if entity is None:
                 entity = entityNew
-            self.graph.create(entity)
+            #TODO: test
+                self.graph.create(entity)
             logger.debug('Entity created: ' + str(entity))
             return entity
-
+    
+    def findNodeByProperty(self, eudat_type, property_key, property_value):
+        #nodes = self.graph.node_selector.select().where(**{property_key: property_value})
+        #if nodes is not None:
+        #    return nodes.first()
+        #else:
+        #    return None
+        return self.graph.find_one(eudat_type, property_key, property_value)
 
     def _createPointer(self, pointer_type, value):
         """Defines a graph node which represents a pointer to nodes stored
@@ -488,7 +498,7 @@ class GraphDBClient():
                 self.graph.create_unique(de_belongs_to_agg)
                 logger.debug('Created relation: ' + str(de_belongs_to_agg))
         
-    def updateGraphDeletingDefaultDiv(self, defaultDiv, smap, filePaths):
+    def updateGraphDeletingDefaultDiv(self, defaultDiv):
         if self.conf.dryrun:
             print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
         else:
@@ -509,7 +519,7 @@ class GraphDBClient():
 #           #than detach delete the given node
 #           MATCH (n) DETACH DELETE n
         
-    def updateGraphDeletingNodes(self, deletedDivs, smap, filePaths):
+    def updateGraphDeletingNodes(self, deletedDivs):
         if self.conf.dryrun: 
             print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
         else: 
@@ -616,8 +626,8 @@ def getFilePathMapRecursively(nestedObjectsList, filePaths):
 def sync(args):
     configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
     configuration.parseConf();
-    
-    gdbc = GraphDBClient(configuration, args.path)
+    path = args.path
+    gdbc = GraphDBClient(configuration, path)
     
     logger.info("Sync starting ...")
     mp = manifest.MetsParser(configuration, logger)
@@ -629,16 +639,16 @@ def sync(args):
         irodsu.setUser(args.user[0])
     
     #get the 'old' manifest from the collection already puted into iRODS
-    xmltext = irodsu.getFile(args.path + '/manifest.xml') 
+    xmltext = irodsu.getFile(path + '/manifest.xml') 
     if xmltext is None:
         logger.error('manifest.xml file not found')
-    
     
     try:
         structuralMaps = mp.parse(xmltext)
         for smapName, smap in structuralMaps.iteritems():
-            oldXMLtext = irodsu.getFile(args.path + '/manifest.xml.old')
-            if oldXMLtext: 
+            smapNode = gdbc.findNodeByProperty("Aggregation", "name", smapName)
+            oldXMLtext = irodsu.getFile(path + '/manifest.xml.old')
+            if (oldXMLtext is not None) & (smapNode is not None): 
                 mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
                 mets_from_new_manifest = CreateFromDocument(xmltext)
                 oldStructuralMaps = mp.parse(oldXMLtext)
@@ -650,18 +660,19 @@ def sync(args):
                     metsComparator = MetsManifestComparator(configuration, logger)
                     diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
                     
-                    oldSmap = oldStructuralMaps[smapName]
-                    if oldSmap is None:
+                    oldFilePathMap = {}
+                    if smapName not in oldStructuralMaps:
                         logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
                         break
+                    else:
+                        oldSmap = oldStructuralMaps[smapName]
+                        oldFilePathMap = getFilePathMapFrom(oldSmap)
+                        
                     newFilePathMap = getFilePathMapFrom(smap)
-                    oldFilePathMap = getFilePathMapFrom(oldSmap)
-                    
                     for k, v in diff.iteritems():
                         if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
                             structMapDiff = v
                             for key, val in structMapDiff.iteritems():
-                                #TODO: rename case of the collection
                                 collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
                                 
                                 if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
@@ -669,11 +680,11 @@ def sync(args):
                                     gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
                                     
                                     deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
-                                    gdbc.updateGraphDeletingNodes(deletedDivs, oldSmap, oldFilePathMap)
+                                    gdbc.updateGraphDeletingNodes(deletedDivs)
                                 elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
                                     gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
                                 elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
-                                    gdbc.updateGraphDeletingDefaultDiv(val, oldSmap, oldFilePathMap)
+                                    gdbc.updateGraphDeletingDefaultDiv(val)
                                 else:
                                     logger.info('ERROR: should not happen, unknown key in the diff map') 
                         else:
@@ -683,8 +694,23 @@ def sync(args):
                 else:
                     logger.error('Manifest comparison not done, because one of manifest files was not found')            
             else: 
-                gdbc.push(smap)
-        
+                #create subgraph for the smap
+                if smapNode is None:
+                    gdbc.push(smap, path)
+                    #mp.parse(xmltext) collects all mptr path's in list smap['linkedMets']
+                    linkedMets = []
+                    for obj in smap['nestedObjects']:
+                        if obj['linkedMets']:
+                            linkArr = obj['linkedMets']
+                            link = linkArr[0]
+                            linkedMets.append(link)
+                    smapArr = []
+                    smapArr.append(path + '/manifest.xml')
+                    rootSmapNode = gdbc.findNodeByProperty("Aggregation", "name", smapName)
+                    for pathToLinkedMets in linkedMets:
+                        irodsPathToLinkedMets = gdbc.root + pathToLinkedMets.replace("file:/","")
+                        syncLinkedMets(smapArr, rootSmapNode, irodsPathToLinkedMets, irodsu, gdbc, mp)
+                    
         logger.info("Sync completed")
         
         if args.user:
@@ -695,7 +721,36 @@ def sync(args):
         logger.error("SAXParseException: "+traceback.format_exc())
     except:
         logger.error(traceback.format_exc())
-    
+
+def syncLinkedMets(rootSmaps, rootSmapNode, pathToLinkedMets, irodsu, gdbc, mp):
+    linkedMetsXMLtext = irodsu.getFile(pathToLinkedMets)
+    linkedSmaps = mp.parse(linkedMetsXMLtext)
+    for linkedSmapName, linkedSmap in linkedSmaps.iteritems():
+        #should be only one in
+        if linkedSmapName is None:
+            logger.error("no smap LABEL to find the root node in the graph found in: "+pathToLinkedMets)
+        
+        linkedSmapNode = gdbc.findNodeByProperty("Aggregation", "name", linkedSmapName)
+        if linkedSmapNode is None:
+            pathToSubColl = pathToLinkedMets.rsplit('/',1)[0]
+            gdbc.push(linkedSmap, pathToSubColl)   
+            linkedSmapNode = gdbc.findNodeByProperty("Aggregation", "name", linkedSmapName)
+        
+        if linkedSmapNode is not None:
+            smap_is_linked_to = Relationship(linkedSmapNode, "IS_LINKED_TO", rootSmapNode)
+            gdbc.graph.create_unique(smap_is_linked_to)
+            logger.debug('Created relation: ' + str(smap_is_linked_to))
+        linkedMetsInlinkedSmap = []
+        for obj in linkedSmap['nestedObjects']:
+            if obj['linkedMets']:
+                linkArr = obj['linkedMets']
+                link = linkArr[0]
+                linkedMetsInlinkedSmap.append(link)
+        for pathToLinkedMetsInlinkedSmap in linkedMetsInlinkedSmap:
+            if pathToLinkedMetsInlinkedSmap not in rootSmaps:
+                rootSmaps.append(pathToLinkedMets)
+                syncLinkedMets(rootSmaps, linkedSmapName, pathToLinkedMetsInlinkedSmap, irodsu, gdbc)
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='B2SAFE graphDB client')

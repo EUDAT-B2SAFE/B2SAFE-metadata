@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 # -*- python -*-
 
-import subprocess
+import json
 import logging
 import os
-import json
+import subprocess
 
 
 ##############################################################################
 # iRODS Admin Utility Class #
 ##############################################################################
-
 class IRODSUtils():
     """ 
     utility for irods management
@@ -39,8 +38,11 @@ class IRODSUtils():
         if resource is not None:
             cmdList += ['-R', resource]
         cmdList += [path, '-']
-        (rc, out) = self.execute_icommand(cmdList)
-        return out
+        try:
+            (rc, out) = self.execute_icommand(cmdList)
+            return out
+        except:
+            return None
 
    
     def putFile(self, source, destination, resource=None):
@@ -156,11 +158,11 @@ class IRODSUtils():
     
     def deepListDir(self, path, abs_path=True):
         """List recursively the content of a directory"""
-
-        self.logger.debug('Listing recursively the path: ' + path)
+        pathString = str(path)
+        self.logger.debug('Listing recursively the path: ' + pathString)
 #TODO in case of memory issue for large collections, consider to use
 # a shelve object instead of a dictionary.
-        (rc, out) = self.execute_icommand(["ils", "-r", path])
+        (rc, out) = self.execute_icommand(["ils", "-r", pathString])
         if out is not None:
             tree = {}
             fpath = ''

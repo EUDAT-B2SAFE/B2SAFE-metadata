@@ -13,19 +13,18 @@ import json
 import fnmatch
 import tempfile
 import re
-import hashlib
 
-from manifest import IRODSUtils
+from manifest.irodsUtility import IRODSUtils
+#from manifest import IRODSUtils
 from manifest.libmets import *
 
 logger = logging.getLogger('GraphDBClient')
 
-"""It represents the collection associated to a manifest."""
-
 class Collection():
 
+
     def __init__(self, config, logger):
-        """Initialize the collection"""
+
         self.conf = config
         self.logger = logger
        
@@ -57,17 +56,18 @@ class Collection():
         return dir
 
 
-"""It represents the METS manifest."""
-
 class MetsManifest():
 
-    def __init__(self, ftree, config, logger):
-        """Initialize the manifest"""
+
+    def __init__(self, ftree, config, root_path, logger):
+        self.rootPath = root_path
+        pathParts = root_path.split(os.sep)
+        self.rootCollName = pathParts[len(pathParts)-1]
         self.conf = config
         self.logger = logger 
-
-        mf = mets(ID="_EUDATMETS_" + str(uuid.uuid4()), 
-                  LABEL="EUDAT METS document")
+        manifest_path = root_path + os.sep + 'manifest.xml'
+        uniqueID = str(uuid.uuid3(uuid.NAMESPACE_DNS, manifest_path))
+        mf = mets(ID="_EUDATMETS_" + uniqueID, LABEL="EUDAT METS document")
         self.logger.debug('Building the METS file section')
         mf.fileSec = CTD_ANON_3()
         root = ''
@@ -78,14 +78,14 @@ class MetsManifest():
         with open(self.conf.md_jsonld_file, 'r') as f:
             collStruct = json.load(f)
         self.logger.debug('Building the METS structural map section')
-        rootName = ftree.keys()[0]
+        rootName = ftree.keys()[0] + '_' + str(uuid.uuid3(uuid.NAMESPACE_DNS, ftree.keys()[0]))
         smap = self.buildStructMap(rootName, collStruct)
         mf.structMap.append(smap)
         self.manifest = mf
 
    
     def getManifest(self):
-        """Return the manifest object"""
+        
         return self.manifest
  
 
@@ -97,19 +97,23 @@ class MetsManifest():
         self.logger.debug('Building the METS fileGrpType')
         for coll in dirs:
             self.logger.debug('Processing dir: {}'.format(coll))
+            parent = ""
+            coll_unique_ID = ""
             if not self.conf.abs_path:
                 # the path are absolute
                 parent = root + '/' + coll
-                groupId = parent.replace('/', '_')
+                coll_unique_ID = str(uuid.uuid3(uuid.NAMESPACE_DNS, parent))
+                groupId = '_' + coll + '_' + coll_unique_ID
             else:
                 # the path are relative
                 parent = coll
-                groupId = (root + '/' + coll).replace('/', '_')
+                coll_unique_ID = str(uuid.uuid3(uuid.NAMESPACE_DNS, parent))
+                groupId = '_' + coll.rsplit('/', 1)[1] + '_' + coll_unique_ID
             fgrp = fileGrpType(ID=groupId)
             fgrp_files = fileGrpType(ID=groupId+'__files__')
             for fp in dirs[coll]['__files__']:
                 # loop over the files of the collection
-                fileId = groupId + '_' + fp
+                fileId = '_' + fp + '_' + str(uuid.uuid3(uuid.NAMESPACE_DNS, parent+os.sep+fp))
                 ft = fileType(ID=fileId)
                 # create a METS element FLocat
                 loc = CTD_ANON_19(LOCTYPE='URL')
@@ -146,22 +150,19 @@ class MetsManifest():
         processedPaths = []
         # loop over the metadata description of the collection provided 
         # as a jsonld doc
-        i=0
         for entity in collStruct['Structure']:
 
             self.logger.debug('Processing the jsonld entity: {}'.format(
                               pprint.pformat(entity)))
             normPath = entity['path'][2:]
             self.logger.debug('with path: ' + normPath)
-            self.logger.debug('with fileMap: ' + str(self.fileMap))
             pathSubSet = self.patternMatch(normPath, self.fileMap.keys())
             self.logger.debug('which matches the following patterns: ' 
                               + pprint.pformat(pathSubSet.keys()))
             processedPaths += pathSubSet.keys()
             for path in pathSubSet.keys():
                 self.entityRelMgmt(path, entity, pathSubSet[path], temp_div, 
-                                   temp_rel, future_rel, i, rootName)
-                i=i+1
+                                   temp_rel, future_rel)
 
         divMainList = []
         # for each entity 
@@ -192,26 +193,38 @@ class MetsManifest():
 
 
     def divBuilder(self, label, etype, path):
-        """It builds the manifest element of type DIV""" 
         self.logger.debug('divBuilder for path: {}'.format(path))
         div = divType(LABEL=label, TYPE=etype)
-        fptr = CTD_ANON_13(FILEID=self.fileMap[path])
-        div.fptr.append(fptr)
+        fileID = self.fileMap[path]
+        if self.isAnotherManifest(path):
+            mptr = CTD_ANON_12(LOCTYPE='URL')
+            mptr.type= 'simple'
+            mptr.href = 'file://' + path
+            div.mptr.append(mptr)
+        else:
+            fptr = CTD_ANON_13(FILEID=fileID)
+            div.fptr.append(fptr)
         return div
-
+    
+    def isAnotherManifest(self, path):
+        pathParts = path.split('/')
+        fileName = pathParts[len(pathParts)-1]
+        filePath = (os.sep).join(pathParts[:len(pathParts)-1])
+        if ("manifest" in fileName) & (self.rootCollName != filePath):
+            return True
+        else:
+            return False
 
     def entityRelMgmt(self, normPath, entity, templateDict, divDict, relDict, 
-                      placeHolderDict, ind, rootName):
-        """It builds the manifest element of type DIV, which contains the 
-           objects that are related to each other, using the information of the 
-           json-ld document as input.
-        """
+                      placeHolderDict):
+
         # for each path a mets div is created and stored in a temp list
         div = self.divBuilder(entity['format'], entity['type'], normPath)
         divDict[normPath] = div
         if 'isRelatedTo' in entity.keys():
             # analyze the relations of this entity with others
-            divRel = divType(TYPE="entityRelation")
+            label = 'rel_' + str(uuid.uuid3(uuid.NAMESPACE_DNS, normPath.encode("utf8")))
+            divRel = divType(LABEL=label, TYPE="entityRelation")
             divRel.append(div)
             for relation in entity['isRelatedTo']:
                 normPathRel = relation['@id'][2:]
@@ -231,18 +244,6 @@ class MetsManifest():
                         placeHolderDict[path].append(normPath)
                     else:
                         placeHolderDict[path] = [normPath]
-            for dr in divRel.div:
-                fpList = []
-                for fp in dr.fptr:
-                    fpList.append(fp.FILEID)
-            if fpList is not None:
-                ordPathList = sorted(fpList)
-                stringPathList = ''.join(ordPathList)
-                hashDivRel = hashlib.md5(stringPathList.strip()).hexdigest()
-            else:
-                hashDivRel = ind
-            #divRel.LABEL = 'rel_' + rootName + '_' + hashDivRel
-            divRel.LABEL = 'rel_' + rootName
             relDict[normPath] = divRel
         # if this entity does not provide its own relations, check if 
         # is related to previously defined entities.
@@ -252,10 +253,7 @@ class MetsManifest():
 
 
     def patternMatch(self, pattern, targets):
-        """It checks if there are real phisycal paths matching the regular
-           expressions included in the json-ld document and returns a dictionary
-           which maps template variables and paths.
-        """
+
         # translate the unix shell like pattern syntax to regular expression
         transRegex = fnmatch.translate(pattern)
         # check if there are templates variable in the path: ${varName}
@@ -263,20 +261,18 @@ class MetsManifest():
         if templateNames:
             for tNames in templateNames:
                 # for each template var creates a regex group
-                transRegex = transRegex.replace('\$\{'+ tNames +'\}', 
-                                                r'(?P<'+ tNames +'>\w+)')
+                transRegex = transRegex.replace('\$\{'+ tNames +'\}', r'(?P<'+ tNames +'>\w+)')
         pathRegex = transRegex + '$'
         template = re.compile(pathRegex)
         pathSubSet = {}
-        # loop over all the patterns to filter them according to the regex 
-        # expression
+        # loop over all the patterns to filter them according to the regex expression
         for item in targets:
             m = template.match(item)
             if m:
                 pathSubSet[item] = {}
                 for tNames in templateNames:
-                    # store in a dictionary the values of the template vars used
-                    # in each pattern
+                    # store in a dictionary the values of the template vars used in a 
+                    # each pattern
                     pathSubSet[item][tNames] = m.group(tNames)
 
         return pathSubSet 
@@ -327,11 +323,10 @@ class Configuration():
       
         self.irods_home_dir = self._getConfOption('iRODS', 'irods_home_dir')
         self.irods_debug = self._getConfOption('iRODS', 'irods_debug', True)
-        self.irods_versioning_res = self._getConfOption('iRODS', 
-                                                        'irods_versioning_res')
-        self.irods_resource = self._getConfOption('iRODS', 'irods_resource')
-       
- 
+#TODO add it to the configuration and exploit when possible in irods command
+#        self.irods_resource = self._getConfOption('iRODS', 'irods_resource')
+
+        
     def _getConfOption(self, section, option, boolean=False):
         """
         get the options from the configuration file
@@ -360,35 +355,32 @@ def writeMets(args):
     logger.info("Starting ...")
 
     logger.info('Parsing the collection tree ...')
+    root_path = ""
     if args.filesystem:
+        root_path = args.filesystem[0]
         logger.debug('on file system')
         coll = Collection(configuration, logger)
         res = coll.traverse(args.filesystem[0], configuration.abs_path)
     else:
+        root_path = args.irods[0]
         logger.debug('on iRODS namespace')
         irodsu = IRODSUtils(configuration.irods_home_dir, logger,
                             configuration.irods_debug)
-        if args.user:
-            irodsu.setUser(args.user[0])        
         rc, res = irodsu.deepListDir(args.irods[0], configuration.abs_path)
-        irodsu.unsetUser()
-        if rc < 0:
-            print "The input collection is empty"
-            sys.exit(-1)
     logger.debug('Collection tree:\n{}'.format(pprint.pformat(res)))
 
     logger.info('Building the METS manifest document')
-    mm = MetsManifest(res, configuration, logger)
+    mm = MetsManifest(res, configuration, root_path, logger)
     manifest = mm.getManifest()
     dom = xml.dom.minidom.parseString(manifest.toxml("utf-8"))
     manifestXML = dom.toprettyxml(indent="  ", encoding="utf-8")
 
     if args.dryrun:
-        print manifestXML
+        print(manifestXML)
     else:
+        target = root_path + os.sep + 'manifest.xml'
         logger.info('Writing the manifest to a file')
         if args.filesystem:
-            target = args.filesystem[0] + os.sep + 'manifest.xml'
             logger.info('in the file system: {}'.format(target))
             with open(target, 'w') as f:
                 f.write(manifestXML)
@@ -396,13 +388,13 @@ def writeMets(args):
             temp = tempfile.NamedTemporaryFile()
             try:
                 temp.write(manifestXML)
-                temp.seek(0)
-                target = args.irods[0] + '/' + 'manifest.xml'
+                temp.flush()
                 logger.info('in the irods namespace: {}'.format(target))
-                if args.user:
-                    irodsu.setUser(args.user[0])
-                irodsu.putFile(temp.name, target, configuration.irods_resource)
-                irodsu.unsetUser()
+                try: 
+                    irodsu.putFile(temp.name, target, configuration.irods_resource)
+                except:
+                    out = irodsu.putFile(temp.name, target)
+                    print(str(out))
             finally:
                 temp.close()
 
@@ -417,7 +409,6 @@ if __name__ == "__main__":
                        help="enable debug")
     mfact.add_argument("-d", "--dryrun", action="store_true",
                        help="run without performing any real change")
-    mfact.add_argument("-u", "--user", nargs=1, help="irods user")
 
     input_group = mfact.add_mutually_exclusive_group(required=True)
     input_group.add_argument("-i", "--irods", nargs=1, help="irods path")
