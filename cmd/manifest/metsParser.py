@@ -222,7 +222,7 @@ def metsToDict(args):
     else:
         xmltext = args.file.read()
 
-    pprint.pprint(mp.parse(xmltext))
+    #pprint.pprint(mp.parse(xmltext))
     logger.info("Parsing completed")
 
 

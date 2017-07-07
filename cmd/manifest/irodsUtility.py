@@ -179,6 +179,28 @@ class IRODSUtils():
 
         return (rc, None)
 
+    def listDir(self, path, abs_path=True):
+        """List only the content of a directory"""
+        pathString = str(path)
+        self.logger.debug('Listing the path: ' + pathString)
+        #TODO in case of memory issue for large collections, consider to use
+        # a shelve object instead of a dictionary.
+        (rc, out) = self.execute_icommand(["ils", pathString])
+        if out is not None:
+            tree = {}
+            fpath = ''
+            i = 0
+            lines = out.splitlines()
+            if lines and len(lines) > 0:
+                # split the root path in parent and child(relative or absolute)
+                parent, fpath = self._pathSplit(lines[0].strip()[:-1], abs_path)
+                # recursive loop over collections
+                tree[fpath], ind = self._parseColl(fpath, {'__files__': []}, 
+                                                   lines[1:], abs_path)
+
+            return (rc, tree)
+
+        return (rc, None)
     
     def _parseColl(self, parent_path, tree, lines, abs_path=True):
 

@@ -1,0 +1,48 @@
+{
+  "@context": { 
+    "@vocab": "./conf/EudatControlledVocabulary.jsonld",
+    "path": "@id"
+  },
+  "Structure": [
+    {
+      "@type": "Entity",
+      "path": "_:${dir}/A3/dat1.txt",
+      "type": "Data",
+      "format": "miniseed"
+    },
+	{
+      "@type": "Entity",
+      "path": "_:${dir}/test.txt",
+      "type": "Data",
+      "format": "miniseed"
+    },
+    {
+      "@type": "Entity",
+      "path": "_:${dir}/collection_A1/test1.txt",
+      "type": "Data",
+      "format": "miniseed"
+    },
+    {
+      "@type": "Entity",
+      "path": "_:${dir}/test3.txt", 
+      "type": "Composite",
+      "format": "seed"
+    }, 
+    {
+      "@type": "Entity",
+      "path": "_:${dir}/test2.txt",
+      "type": "DescriptiveMetaData",
+      "format": "dataless",
+      "isRelatedTo": [
+	    { "@id": "_:${dir}/test.txt" },
+        { "@id": "_:${dir}/collection_A1/test1.txt" }
+      ]
+    },   
+    {
+      "@type": "Entity",
+      "path": "_:*meta*",
+      "type": "DescriptiveMetaData",
+      "format": "dataless"
+    }
+  ]
+}

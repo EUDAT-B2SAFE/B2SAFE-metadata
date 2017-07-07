@@ -57,7 +57,19 @@ class MetsManifestComparator():
         if self.debug:
             loglevel = 'DEBUG'
         self.logger.setLevel(self.log_level[loglevel])
-
+    
+    def compareLinks(self, linksInOldMets, linksInNewMets):
+        addedLinks = []
+        deletedLinks = linksInOldMets
+        for link in linksInNewMets:
+            if link not in linksInOldMets:
+                addedLinks.append(link)
+            else:
+                deletedLinks.remove(link)
+        result = {}
+        result["addedLinks"] = addedLinks
+        result["deletedLinks"] = deletedLinks
+        return result
 
     def compareMetsManifestFiles(self, oldmets, newmets):
         self.logger.debug('Begin comparing manifest files')

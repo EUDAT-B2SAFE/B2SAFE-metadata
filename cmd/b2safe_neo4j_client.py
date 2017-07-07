@@ -38,7 +38,7 @@ logger = logging.getLogger('GraphDBClient')
 
 class GraphDBClient():
     
-    def __init__(self, conf, rootPath):
+    def __init__(self, conf, rootPath, irodsu):
         """
         Graph initialization
         """
@@ -46,9 +46,7 @@ class GraphDBClient():
         self.root = rootPath.rsplit('/',1)[0]
         self.collPath = rootPath
         # initializing the iRODS commands
-        self.irodsu = manifest.IRODSUtils(self.conf.irods_home_dir,
-                                          logger,
-                                          self.conf.irods_debug)
+        self.irodsu = irodsu
         # authentication
         logger.info("Connecting to " + self.conf.graphdb_addr
                     + " with user " + self.conf.graphdb_user)    
@@ -75,7 +73,10 @@ class GraphDBClient():
                 logger.warning('Graph error: %s', ge)
             self.zone = Node("Zone", name=self.conf.irods_zone_name, 
                                      endpoint=self.conf.irods_zone_ep)
-            self.graph.create(self.zone)
+            if self.conf.dryrun:
+                print("create node for ZONE: "+self.conf.irods_zone_name)
+            else: 
+                self.graph.create(self.zone)
             resources = self.conf.irods_res.split(',')
             for res in resources:
                 res_name,res_path = res.split(':')
@@ -83,10 +84,13 @@ class GraphDBClient():
                 res_is_located_in_zone = Relationship(self.resNode, 
                                                       "IS_AVAILABLE_IN", 
                                                       self.zone)
-                try:
-                    self.graph.create_unique(res_is_located_in_zone)
-                except GraphError as ge:
-                    logger.warning('Graph error: %s', ge)
+                if self.conf.dryrun:
+                    print("create node and relation for Resource: "+res_name+" under path "+res_path)
+                else: 
+                    try:
+                        self.graph.create_unique(res_is_located_in_zone)
+                    except GraphError as ge:
+                        logger.warning('Graph error: %s', ge)
         else:
             logger.info('Node "Zone" found')
 
@@ -430,17 +434,11 @@ class GraphDBClient():
             entity = self.graph.find_one(eudat_type, "name", name)
             if entity is None:
                 entity = entityNew
-            #TODO: test
                 self.graph.create(entity)
             logger.debug('Entity created: ' + str(entity))
             return entity
     
     def findNodeByProperty(self, eudat_type, property_key, property_value):
-        #nodes = self.graph.node_selector.select().where(**{property_key: property_value})
-        #if nodes is not None:
-        #    return nodes.first()
-        #else:
-        #    return None
         return self.graph.find_one(eudat_type, property_key, property_value)
 
     def _createPointer(self, pointer_type, value):
@@ -518,20 +516,36 @@ class GraphDBClient():
 #             
 #           #than detach delete the given node
 #           MATCH (n) DETACH DELETE n
-        
+    
     def updateGraphDeletingNodes(self, deletedDivs):
         if self.conf.dryrun: 
             print("detach, delete the node from aggregation node, check if there are loose nodes after detach")
         else: 
-            for nodeName, divToDelete in deletedDivs.iteritems(): 
+            for nodeName in deletedDivs.keys(): 
                 cypher = self.graph.cypher
                 cypher.execute("MATCH (n{name:{nName}})-[r]-(m)-[t]-(x) WITH n, m, count(t)+1 AS mrel WHERE mrel = 1 DETACH DELETE m", {"nName":str(nodeName)})
                 cypher.execute("MATCH (n{name:{nName}}) DETACH DELETE n", {"nName":str(nodeName)})
     
+    def getLinkedNodes(self, nodeName):
+        if self.conf.dryrun: 
+            print("get nodes with IS_LINKED_TO rel to node  " +nodeName)
+            return []
+        else:
+            cypher = self.graph.cypher
+            return cypher.execute("MATCH (n) - [rel:IS_LINKED_TO]-(m) WHERE m.name = {mName} return n", {"mName":str(nodeName)})
+    
+    def deleteLinkedToRelationBetween(self, smapName, linkedSmapName):
+        if self.conf.dryrun: 
+            print("delete relation between rootSmap: " +smapName+ " and linkedSmap: " +linkedSmapName)
+        else:
+            cypher = self.graph.cypher
+            tx = cypher.begin()
+            cypher.execute("MATCH (a)-[r:IS_LINKED_TO]-(b) WHERE a.name = {nName} AND b.name = {mName} DELETE r", {"nName":str(smapName), "mName":str(linkedSmapName)})
+            tx.commit()
 ################################################################################
 # Configuration Class #
 ################################################################################
- 
+
 class Configuration():
     """ 
     Get properties from filesystem
@@ -600,159 +614,254 @@ class Configuration():
             self.logger.warning('missing parameter %s:%s' % (section,option))
             return None
 
+############################################################################################
+# B2SAFE GraphDB synchronizer                                                              #
+# holds configuration information, a GraphDBClient, MetsParser and IRODSUtils instance     # 
+# for all operations needed to be done to synchronize the descriptions of iRODS collection #
+# with the neo4j graph.                                                                    #
+############################################################################################
 
-################################################################################
-# B2SAFE GraphDB client Command Line Interface #
-################################################################################
-def getFilePathMapFrom(smap):
-    filePaths = {}
-    for obj in smap['nestedObjects']:
-        if len(obj['nestedObjects']) > 0 :
-            getFilePathMapRecursively(obj['nestedObjects'], filePaths)
-        else:
-            for fileId, path in obj['filePaths'].iteritems():
-                filePaths[fileId] = path
+class GraphDBSynchronizer():
     
-    return filePaths
+    def __init__(self, configuration, gdbc, mp, irodsu):
+        """
+        Synchronizer initialization
+        """
+        self.configuration = configuration
+        self.gdbc = gdbc
+        self.mp = mp
+        self.irodsu = irodsu
+        logger.info("GraphDBSynchronizer created")
+        
+        self.sychronizedPaths = []
     
-def getFilePathMapRecursively(nestedObjectsList, filePaths):
-    for obj in nestedObjectsList:
-        if len(obj['nestedObjects']) > 0 :
-            getFilePathMapRecursively(obj['nestedObjects'], filePaths)
-        else:
-            for fileId, path in obj['filePaths'].iteritems():
-                filePaths[fileId] = path
-
-def sync(args):
-    configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
-    configuration.parseConf();
-    path = args.path
-    gdbc = GraphDBClient(configuration, path)
-    
-    logger.info("Sync starting ...")
-    mp = manifest.MetsParser(configuration, logger)
-    logger.info("Reading METS manifest ...")
-    irodsu = manifest.IRODSUtils(configuration.irods_home_dir, logger,
-                             configuration.irods_debug)
-    if args.user:
-        logger.info('Working as user ' + args.user[0])
-        irodsu.setUser(args.user[0])
-    
-    #get the 'old' manifest from the collection already puted into iRODS
-    xmltext = irodsu.getFile(path + '/manifest.xml') 
-    if xmltext is None:
-        logger.error('manifest.xml file not found')
-    
-    try:
-        structuralMaps = mp.parse(xmltext)
-        for smapName, smap in structuralMaps.iteritems():
-            smapNode = gdbc.findNodeByProperty("Aggregation", "name", smapName)
-            oldXMLtext = irodsu.getFile(path + '/manifest.xml.old')
-            if (oldXMLtext is not None) & (smapNode is not None): 
-                mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
-                mets_from_new_manifest = CreateFromDocument(xmltext)
-                oldStructuralMaps = mp.parse(oldXMLtext)
-                if not oldStructuralMaps:
-                    logger.error('no strucktMap in new manifest.xml found')
-                    break
-                
-                if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
-                    metsComparator = MetsManifestComparator(configuration, logger)
-                    diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
-                    
-                    oldFilePathMap = {}
-                    if smapName not in oldStructuralMaps:
-                        logger.error('no smap with name '+ smapName + ' found in the new manifest.xml')
-                        break
-                    else:
-                        oldSmap = oldStructuralMaps[smapName]
-                        oldFilePathMap = getFilePathMapFrom(oldSmap)
+    def createOrUpdateGraph(self, path):
+        #get the 'old' manifest from the collection already injected into iRODS
+        manifests = self.getManifestFilesFrom(path)
+        xmltext = manifests["newManifestFile"]
+        oldXMLtext = manifests["oldManifestFile"]
+        if xmltext is None:
+            logger.error('manifest.xml file not found')
+        else: 
+            try:
+                logger.info("Reading METS manifest ...")
+                structuralMaps = self.mp.parse(xmltext)
+                for smapName, smap in structuralMaps.iteritems():
+                    smapNode = self.gdbc.findNodeByProperty("Aggregation", "name", smapName)
+                    if (oldXMLtext is not None) & (smapNode is not None):
+                        #the manifest was changed and the subgraph for the smap exists, so update of the subgraph is needed
+                        mets_from_old_manifest = CreateFromDocument(oldXMLtext) 
+                        mets_from_new_manifest = CreateFromDocument(xmltext)
+                        oldStructuralMaps = self.mp.parse(oldXMLtext)
+                        if not oldStructuralMaps:
+                            logger.error('no strucktMap in old manifest.xml found')
+                            break
                         
-                    newFilePathMap = getFilePathMapFrom(smap)
-                    for k, v in diff.iteritems():
-                        if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
-                            structMapDiff = v
-                            for key, val in structMapDiff.iteritems():
-                                collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
-                                
-                                if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
-                                    addedDivs = val[MetsManifestComparator.ADDED_DIVS]
-                                    gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
-                                    
-                                    deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
-                                    gdbc.updateGraphDeletingNodes(deletedDivs)
-                                elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
-                                    gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
-                                elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
-                                    gdbc.updateGraphDeletingDefaultDiv(val)
-                                else:
-                                    logger.info('ERROR: should not happen, unknown key in the diff map') 
-                        else:
-                            print("fileSec Changes not needed for now")
+                        if (mets_from_old_manifest is not None) & (mets_from_new_manifest is not None):
+                            metsComparator = MetsManifestComparator(self.configuration, logger)
+                            diff = metsComparator.compareMetsManifestFiles(mets_from_old_manifest, mets_from_new_manifest);
                             
-                    logger.info('Manifest comparison completed')
+                            oldSmap = oldStructuralMaps[smapName]
+                            self.updateGraphWith(diff, smap)
+                            
+                            linksInOldMets = self.extractLinksFrom(oldSmap)
+                            linksInNewMets = self.extractLinksFrom(smap)
+                            linksDiff = metsComparator.compareLinks(linksInOldMets, linksInNewMets)
+                            
+                            self.updateLinksWith(linksDiff, smapName)
+                                   
+                            logger.info('Graph update completed')
+                        else:
+                            logger.error('Graph update not done, because one of manifest files was not found')            
+                    else: 
+                        #create subgraph for the smap
+                        if smapNode is None:
+                            self.gdbc.push(smap, path)
+                            #create, connect or update all links to other manifests/subgraphs and the linked subgraphs
+                            linkedMets = self.extractLinksFrom(smap)
+                            rootSmapNode = self.gdbc.findNodeByProperty("Aggregation", "name", smapName)
+                            for pathToLinkedMets in linkedMets:
+                                irodsPathToLinkedMets = self.gdbc.root + pathToLinkedMets.replace("file:/","")
+                                self.syncLinkedMets(rootSmapNode, irodsPathToLinkedMets)
+                            
+                logger.info("Sync completed")
+            except pyxb.exceptions_.UnrecognizedContentError:
+                logger.error("UnrecognizedContentError: "+traceback.format_exc())
+            except sax._exceptions.SAXParseException:
+                logger.error("SAXParseException: "+traceback.format_exc())
+            except:
+                logger.error(traceback.format_exc())
+                      
+    def syncLinkedMets(self, rootSmapNode, pathToLinkedMets):
+        #before follow the link, check if not already synchronized, to avoid loops
+        if pathToLinkedMets not in self.sychronizedPaths:
+            self.sychronizedPaths.append(pathToLinkedMets)
+            
+            #follow the link, get the smap
+            linkedMetsXMLtext = self.irodsu.getFile(pathToLinkedMets)
+            linkedSmaps = self.mp.parse(linkedMetsXMLtext)
+            for linkedSmapName in linkedSmaps.keys():      
+                #should be only one in
+                if linkedSmapName is None:
+                    logger.error("no smap LABEL to find the root node in the graph found in: "+pathToLinkedMets)
+                
+                #entry in the recursion if linked smap has further links
+                self.createOrUpdateGraph(pathToLinkedMets.rsplit('/',1)[0])
+                
+                #connect the root node (of the smap) to the linked one with the IS_LINKED_TO relation
+                linkedSmapNode = self.gdbc.findNodeByProperty("Aggregation", "name", linkedSmapName)
+                if linkedSmapNode is not None:
+                    if self.configuration.dryrun: 
+                        print("create relation between rootSmap: " +rootSmapNode.name+ " and linkedSmap: " +linkedSmapName)
+                    else:
+                        smap_is_linked_to = Relationship(linkedSmapNode, "IS_LINKED_TO", rootSmapNode)
+                        #if already connected will do nothing
+                        self.gdbc.graph.create_unique(smap_is_linked_to)
+                        logger.debug('Created relation: ' + str(smap_is_linked_to))
                 else:
-                    logger.error('Manifest comparison not done, because one of manifest files was not found')            
-            else: 
-                #create subgraph for the smap
-                if smapNode is None:
-                    gdbc.push(smap, path)
-                    #mp.parse(xmltext) collects all mptr path's in list smap['linkedMets']
-                    linkedMets = []
-                    for obj in smap['nestedObjects']:
-                        if obj['linkedMets']:
-                            linkArr = obj['linkedMets']
-                            link = linkArr[0]
-                            linkedMets.append(link)
-                    smapArr = []
-                    smapArr.append(path + '/manifest.xml')
-                    rootSmapNode = gdbc.findNodeByProperty("Aggregation", "name", smapName)
-                    for pathToLinkedMets in linkedMets:
-                        irodsPathToLinkedMets = gdbc.root + pathToLinkedMets.replace("file:/","")
-                        syncLinkedMets(smapArr, rootSmapNode, irodsPathToLinkedMets, irodsu, gdbc, mp)
+                    logger.error("no smap node with name: "+linkedSmapName)
+        else:
+            logger.info("path already synchronized: "+pathToLinkedMets)
+    
+    def getManifestFilesFrom(self, path):
+        #get all file names that are directly in the collection ()
+        out = self.irodsu.listDir(path)
+        irodsFilesMap = out[1]
+        fileNames = []
+        for key, val in irodsFilesMap.iteritems():
+            for key, val in val.iteritems():
+                if "__files__" in key:
+                    for fileName in val:
+                        fileNames.append(fileName)
+        
+        newManifestPath = ""
+        oldManifestPath = ""
+        manifests = []     
+        for fName in fileNames:
+            if "manifest" in fName:
+                manifests.append(fName)
+        if manifests:
+            manifests.sort()
+            orderedManifests = manifests
+            lastIndex = len(orderedManifests) - 1
+            if lastIndex > 1:
+                newManifestPath = orderedManifests[lastIndex-1]
+                oldManifestPath = orderedManifests[lastIndex-2]
+            elif lastIndex == 1:
+                newManifestPath = orderedManifests[lastIndex]
+            elif lastIndex == 0:
+                newManifestPath = orderedManifests[lastIndex]
+            else:
+                logger.error("unexpected number of manifests")
+        newManifestFile = self.irodsu.getFile(path +"/"+ newManifestPath)
+        oldManifestFile = self.irodsu.getFile(path +"/"+ oldManifestPath)
+        
+        self.sychronizedPaths.append(path +"/"+ newManifestPath)
+        
+        result = {}
+        result["newManifestFile"] = newManifestFile
+        result["oldManifestFile"] = oldManifestFile
+        return result
+        
+    def updateLinksWith(self, linksDiff, smapName):
+        deletedLinks = linksDiff["deletedLinks"]
+        #deleted link -> delete relation
+        for deletedLink in deletedLinks:
+            linkParts = deletedLink.split('/')
+            linkedCollectionName = linkParts[len(linkParts)-2]
+            result = self.gdbc.getLinkedNodes(smapName)
+            nodesList = result.to_subgraph().nodes
+            for linkedNode in nodesList:
+                linkedNodeName = linkedNode["name"]
+                if linkedCollectionName in linkedNodeName:
+                    self.gdbc.deleteLinkedToRelationBetween(smapName, linkedNodeName)
+        
+        #added -> synchLink: createOrUpdate subgraph and create a relation between given smap and the linked one
+        addedLinks = linksDiff["addedLinks"]
+        rootSmapNode = self.gdbc.findNodeByProperty("Aggregation", "name", smapName)
+        for addedLink in addedLinks:
+            irodsPathToLinkedMets = self.gdbc.root + addedLink.replace("file:/","")
+            self.syncLinkedMets(rootSmapNode, irodsPathToLinkedMets)
+            
+    def updateGraphWith(self, diff, smap):
+        newFilePathMap = self.getFilePathMapFrom(smap)
+        for k, v in diff.iteritems():
+            if k == MetsManifestComparator.STRUCT_MAP_CHANGES:
+                structMapDiff = v
+                for key, val in structMapDiff.iteritems():
+                    collectionName = key.replace(MetsManifestComparator.LOGICAL_COLLECTION_CHANGE,"")
                     
-        logger.info("Sync completed")
-        
-        if args.user:
-            irodsu.unsetUser()
-    except pyxb.exceptions_.UnrecognizedContentError:
-        logger.error("UnrecognizedContentError: "+traceback.format_exc())
-    except sax._exceptions.SAXParseException:
-        logger.error("SAXParseException: "+traceback.format_exc())
-    except:
-        logger.error(traceback.format_exc())
-
-def syncLinkedMets(rootSmaps, rootSmapNode, pathToLinkedMets, irodsu, gdbc, mp):
-    linkedMetsXMLtext = irodsu.getFile(pathToLinkedMets)
-    linkedSmaps = mp.parse(linkedMetsXMLtext)
-    for linkedSmapName, linkedSmap in linkedSmaps.iteritems():
-        #should be only one in
-        if linkedSmapName is None:
-            logger.error("no smap LABEL to find the root node in the graph found in: "+pathToLinkedMets)
-        
-        linkedSmapNode = gdbc.findNodeByProperty("Aggregation", "name", linkedSmapName)
-        if linkedSmapNode is None:
-            pathToSubColl = pathToLinkedMets.rsplit('/',1)[0]
-            gdbc.push(linkedSmap, pathToSubColl)   
-            linkedSmapNode = gdbc.findNodeByProperty("Aggregation", "name", linkedSmapName)
-        
-        if linkedSmapNode is not None:
-            smap_is_linked_to = Relationship(linkedSmapNode, "IS_LINKED_TO", rootSmapNode)
-            gdbc.graph.create_unique(smap_is_linked_to)
-            logger.debug('Created relation: ' + str(smap_is_linked_to))
-        linkedMetsInlinkedSmap = []
-        for obj in linkedSmap['nestedObjects']:
+                    if MetsManifestComparator.LOGICAL_COLLECTION_CHANGE in str(key):
+                        addedDivs = val[MetsManifestComparator.ADDED_DIVS]
+                        self.gdbc.updateGraphAddingNodes(addedDivs, collectionName, newFilePathMap)
+                        
+                        deletedDivs = val[MetsManifestComparator.DELETED_DIVS]
+                        self.gdbc.updateGraphDeletingNodes(deletedDivs)
+                    elif MetsManifestComparator.ADDED_DEFAULT_DIV in str(key):
+                        self.gdbc.updateGraphAddingDefaultDiv(val, smap, newFilePathMap)
+                    elif MetsManifestComparator.DELETED_DEFAULT_DIV in str(key):
+                        self.gdbc.updateGraphDeletingDefaultDiv(val)
+                    else:
+                        logger.info('ERROR: should not happen, unknown key in the diff map') 
+            else:
+                print("fileSec Changes not needed for now")
+    
+    def extractLinksFrom(self, smap):
+        #mp.parse(xmltext) collects all mptr path's in list smap['linkedMets']
+        links = []
+        for obj in smap['nestedObjects']:
             if obj['linkedMets']:
                 linkArr = obj['linkedMets']
                 link = linkArr[0]
-                linkedMetsInlinkedSmap.append(link)
-        for pathToLinkedMetsInlinkedSmap in linkedMetsInlinkedSmap:
-            if pathToLinkedMetsInlinkedSmap not in rootSmaps:
-                rootSmaps.append(pathToLinkedMets)
-                syncLinkedMets(rootSmaps, linkedSmapName, pathToLinkedMetsInlinkedSmap, irodsu, gdbc)
+                links.append(link)
+        
+        return links
+    
+    def getFilePathMapFrom(self, smap):
+        filePaths = {}
+        for obj in smap['nestedObjects']:
+            if len(obj['nestedObjects']) > 0 :
+                self.getFilePathMapRecursively(obj['nestedObjects'], filePaths)
+            else:
+                for fileId, path in obj['filePaths'].iteritems():
+                    filePaths[fileId] = path
+        
+        return filePaths
+        
+    def getFilePathMapRecursively(self, nestedObjectsList, filePaths):
+        for obj in nestedObjectsList:
+            if len(obj['nestedObjects']) > 0 :
+                self.getFilePathMapRecursively(obj['nestedObjects'], filePaths)
+            else:
+                for fileId, path in obj['filePaths'].iteritems():
+                    filePaths[fileId] = path
 
+################################################################################
+# B2SAFE GraphDB client Command Line Interface                                 #
+################################################################################
+def sync(args):
+    logger.info("Sync starting ...")
+    configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
+    configuration.parseConf();
+    
+    irodsu = manifest.IRODSUtils(configuration.irods_home_dir, logger, configuration.irods_debug)
+    path = args.path
+    gdbc = GraphDBClient(configuration, path, irodsu)
+    mp = manifest.MetsParser(configuration, logger)
+    
+    if args.user:
+        logger.info('Working as iRODS user ' + args.user[0])
+        irodsu.setUser(args.user[0])
+    
+    synchronizer = GraphDBSynchronizer(configuration, gdbc, mp, irodsu)
+    synchronizer.createOrUpdateGraph(path)
+        
+    if args.user:
+        irodsu.unsetUser()
+    
+    logger.info("Sync END")
+    
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description='B2SAFE graphDB client')
     parser.add_argument("-confpath", help="path to the configuration file")
     parser.add_argument("-dbg", "--debug", action="store_true", 
