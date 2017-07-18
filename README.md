@@ -81,7 +81,8 @@ irods_home_dir=/cinecaDMPZone/home
 irods_debug=True
 ```
 
-##validate_mets_manifest
+## validate_mets_manifest
+
 In order to get the list of options, just type:
 ```
 $ validate_mets_manifest.py -h
