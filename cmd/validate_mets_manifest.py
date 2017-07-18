@@ -9,11 +9,14 @@ import datetime
 import time
 import tempfile
 import xml.dom.minidom
+import pyxb
+import traceback
+from xml import sax
 
 from manifest.libmets import fileGrpType, fileType, CreateFromDocument
 from manifest import IRODSUtils
 
-from b2safe_neo4j_client_new import Configuration
+from b2safe_neo4j_client import Configuration
 
 logger = logging.getLogger('MetsManifestValidator')
 logger.setLevel(logging.INFO)
@@ -164,49 +167,56 @@ def executeValidation(args):
         irodsu.setUser(args.user[0])
     
     xmltext = irodsu.getFile(manifestPath)
-    mets_from_manifest = CreateFromDocument(xmltext)
-    
-    irodsFilesMap = irodsu.deepListDir(collectionPath)
-    
-    validator = MetsManifestValidator(collectionPath, args.debug, args.dryrun, logger)
-    validationResults = validator.validateMetsManifestFile(mets_from_manifest, irodsFilesMap[1])
-    
-    missingFilesIDs = validationResults[0]
-    notExistingFiles = validationResults[1]
-    
-    #TODO: decide what is the best way to store the validation results
-    irodsu.assing_metadata(manifestPath, "VALIDATION_STATUS", "COMPLETED")
-    irodsu.assing_metadata(manifestPath, "IS_CONSISTENT", str(len(validationResults[0]) > 0))
-    irodsu.assing_metadata(manifestPath, "ALL_FILES_EXISTING", str(len(validationResults[1]) > 0))
-    
-    logger.info("IS_CONSISTENT: "+str(len(missingFilesIDs) > 0))
-    logger.info("Missing files for ID's: "+str(missingFilesIDs))   
-    logger.info("ALL_FILES_EXISTING: "+str(len(notExistingFiles) > 0))
-    logger.info("Missing files with path's: "+str(notExistingFiles))
-    
-    manifestXML = setValidationStatusInMetsHdr(xmltext, "VALIDATED")
-    
-    if args.dryrun:
-        print(manifestXML)
-    else:
-        logger.info('Writing the manifest to a file')
+    try:
+        mets_from_manifest = CreateFromDocument(xmltext)
         
-        temp = tempfile.NamedTemporaryFile()
-        try:
-            temp.write(manifestXML)
-            temp.flush()
-            logger.info('in the irods namespace: {}'.format(manifestPath))
-            try: 
-                irodsu.putFile(temp.name, manifestPath, configuration.irods_resource)
-                #irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'), configuration.irods_resource)
-            except:
-                out = irodsu.putFile(temp.name, manifestPath)
-                #out = irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
-                print(str(out))
-        finally:
-            temp.close()
-                
-    logger.info('Manifest validation completed at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+        irodsFilesMap = irodsu.deepListDir(collectionPath)
+        
+        validator = MetsManifestValidator(collectionPath, args.debug, args.dryrun, logger)
+        validationResults = validator.validateMetsManifestFile(mets_from_manifest, irodsFilesMap[1])
+        
+        missingFilesIDs = validationResults[0]
+        notExistingFiles = validationResults[1]
+        
+        #TODO: decide what is the best way to store the validation results
+        irodsu.assing_metadata(manifestPath, "VALIDATION_STATUS", "COMPLETED")
+        irodsu.assing_metadata(manifestPath, "IS_CONSISTENT", str(len(validationResults[0]) > 0))
+        irodsu.assing_metadata(manifestPath, "ALL_FILES_EXISTING", str(len(validationResults[1]) > 0))
+        
+        logger.info("IS_CONSISTENT: "+str(len(missingFilesIDs) > 0))
+        logger.info("Missing files for ID's: "+str(missingFilesIDs))   
+        logger.info("ALL_FILES_EXISTING: "+str(len(notExistingFiles) > 0))
+        logger.info("Missing files with path's: "+str(notExistingFiles))
+        
+        manifestXML = setValidationStatusInMetsHdr(xmltext, "VALIDATED")
+        
+        if args.dryrun:
+            print(manifestXML)
+        else:
+            logger.info('Writing the manifest to a file')
+            
+            temp = tempfile.NamedTemporaryFile()
+            try:
+                temp.write(manifestXML)
+                temp.flush()
+                logger.info('in the irods namespace: {}'.format(manifestPath))
+                try: 
+                    irodsu.putFile(temp.name, manifestPath, configuration.irods_resource)
+                    #irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'), configuration.irods_resource)
+                except:
+                    out = irodsu.putFile(temp.name, manifestPath)
+                    #out = irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+                    print(str(out))
+            finally:
+                temp.close()
+                    
+        logger.info('Manifest validation completed at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+    except pyxb.exceptions_.UnrecognizedContentError:
+        logger.error("UnrecognizedContentError: "+traceback.format_exc())
+    except sax._exceptions.SAXParseException:
+        logger.error("SAXParseException: "+traceback.format_exc())
+    except:
+        logger.error(traceback.format_exc())
     
 def setValidationStatusInMetsHdr(xmltext, status):
     dom = xml.dom.minidom.parseString(xmltext)
