@@ -5,17 +5,20 @@ import argparse
 import os
 import sys
 import logging
+import datetime
+import time
+import tempfile
+import xml.dom.minidom
 
 from manifest.libmets import fileGrpType, fileType, CreateFromDocument
 from manifest import IRODSUtils
-import manifest
 
 from b2safe_neo4j_client_new import Configuration
 
-logger = logging.getLogger('MetsManifestComparator')
+logger = logging.getLogger('MetsManifestValidator')
 logger.setLevel(logging.INFO)
 logfilepath = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), 
-                           'manifestComparator.log')
+                           'metsManifestValidator.log')
 rfh = logging.handlers.RotatingFileHandler(logfilepath, \
                                            maxBytes=10000000, \
                                            backupCount=10)
@@ -49,7 +52,7 @@ class MetsManifestValidator():
                 for entry in fileSystemEntity.content():
                     self.recursiveGetFilesAndFolders(entry, directories, files)
             else:
-                print "EROR: unknown mets element found"
+                logger.error("unknown mets element found")
                 
     def getFilesAndDirectories(self, groups):
         resultDict = {}
@@ -74,8 +77,8 @@ class MetsManifestValidator():
         
         return resultDict
 
-    def getIrodsFilesRec(self, files, path, map):
-        for key, val in map.iteritems():
+    def getIrodsFilesRec(self, files, path, irodsFilesMap):
+        for key, val in irodsFilesMap.iteritems():
             if "__files__" in key:
                 filePrefix = path+"/"
                 filePrefix = "_"+filePrefix[self.irods_home_path.rindex("/")+1:]
@@ -96,8 +99,9 @@ class MetsManifestValidator():
             for fptr_element in div.fptr:
                 fileIdList.append(fptr_element.FILEID)
         if div.content:
-            for innerDiv in div.content() :
-                self.createFileIdListRec(fileIdList, innerDiv)
+            if len(div.content()) > 1:
+                for innerDiv in div.content() :
+                    self.createFileIdListRec(fileIdList, innerDiv)
         
     def createFileIdList(self, smaps):
         fileIdList=[]
@@ -106,7 +110,7 @@ class MetsManifestValidator():
         return fileIdList
     
     def validateManifestConsistency(self, files, mets_from_manifest):
-        #itter over strucktMap get the files and loock if the file is in the fileSec
+        #iterate over strucktMap get the files and look if the file is in the fileSec
         smaps = mets_from_manifest.structMap
         
         if (len(smaps) > 1 | len(smaps) <= 0):
@@ -114,17 +118,19 @@ class MetsManifestValidator():
 
         fileIdList = self.createFileIdList(smaps)
         
-        for id in fileIdList:
-            if id not in files.keys():
-                return False
+        missingFilesIDs = []
+        for file_id in fileIdList:
+            if file_id not in files.keys():
+                missingFilesIDs.append(file_id)
         
-        return True
+        return missingFilesIDs
     
     def validateFilesExistence(self, files, irodsFiles):
-        for file in files:
-            if file not in irodsFiles:
-                return False
-        return True
+        notExistingFiles = []
+        for fileURL in files:
+            if fileURL not in irodsFiles:
+                notExistingFiles.append(fileURL)
+        return notExistingFiles
     
     def validateMetsManifestFile(self, mets_from_manifest, irodsFilesMap):
         self.logger.debug('Begin comparing manifest files')
@@ -134,39 +140,87 @@ class MetsManifestValidator():
         filesAndDirectories = self.getFilesAndDirectories(fileSec.fileGrp)
         
         files = filesAndDirectories["files"]
+        missingFilesIDs = self.validateManifestConsistency(files, mets_from_manifest)
         
-        isConsistent = self.validateManifestConsistency(files, mets_from_manifest)
-        
-        allFilesExisting = None
+        isConsistent = True
+        if missingFilesIDs:
+            isConsistent = False
         
         if isConsistent:
             irodsFiles = self.getIrodsFiles(irodsFilesMap)
-            allFilesExisting = self.validateFilesExistence(files, irodsFiles)
+            notExistingFiles = self.validateFilesExistence(files, irodsFiles)
         
-        return isConsistent, allFilesExisting
+        return missingFilesIDs, notExistingFiles
 
 def executeValidation(args):
- 
-    logger.info ('Starting manifest comparison')
+    logger.info ('Starting manifest comparison at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+    collectionPath = args.path.rsplit('/',1)[0]
+    manifestPath = args.path
     
     configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
     configuration.parseConf();
-    irodsu = manifest.IRODSUtils(configuration.irods_home_dir, logger, configuration.irods_debug)
+    irodsu = IRODSUtils(configuration.irods_home_dir, logger, configuration.irods_debug)
     if args.user:
         irodsu.setUser(args.user[0])
-        
-    xmltext = irodsu.getFile(args.path + '/manifest.xml')
+    
+    xmltext = irodsu.getFile(manifestPath)
     mets_from_manifest = CreateFromDocument(xmltext)
     
-    irodsFilesMap = irodsu.deepListDir(args.path)
+    irodsFilesMap = irodsu.deepListDir(collectionPath)
     
-    validator = MetsManifestValidator(args.path, args.debug, args.dryrun, logger)
-    isValid = validator.validateMetsManifestFile(mets_from_manifest, irodsFilesMap[1])
+    validator = MetsManifestValidator(collectionPath, args.debug, args.dryrun, logger)
+    validationResults = validator.validateMetsManifestFile(mets_from_manifest, irodsFilesMap[1])
+    
+    missingFilesIDs = validationResults[0]
+    notExistingFiles = validationResults[1]
+    
+    #TODO: decide what is the best way to store the validation results
+    irodsu.assing_metadata(manifestPath, "VALIDATION_STATUS", "COMPLETED")
+    irodsu.assing_metadata(manifestPath, "IS_CONSISTENT", str(len(validationResults[0]) > 0))
+    irodsu.assing_metadata(manifestPath, "ALL_FILES_EXISTING", str(len(validationResults[1]) > 0))
+    
+    logger.info("IS_CONSISTENT: "+str(len(missingFilesIDs) > 0))
+    logger.info("Missing files for ID's: "+str(missingFilesIDs))   
+    logger.info("ALL_FILES_EXISTING: "+str(len(notExistingFiles) > 0))
+    logger.info("Missing files with path's: "+str(notExistingFiles))
+    
+    manifestXML = setValidationStatusInMetsHdr(xmltext, "VALIDATED")
+    
+    if args.dryrun:
+        print(manifestXML)
+    else:
+        logger.info('Writing the manifest to a file')
         
-    print("Is a valid manifest: "+str(isValid))
-        
-    logger.info('Manifest validation completed') 
- 
+        temp = tempfile.NamedTemporaryFile()
+        try:
+            temp.write(manifestXML)
+            temp.flush()
+            logger.info('in the irods namespace: {}'.format(manifestPath))
+            try: 
+                irodsu.putFile(temp.name, manifestPath, configuration.irods_resource)
+                #irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'), configuration.irods_resource)
+            except:
+                out = irodsu.putFile(temp.name, manifestPath)
+                #out = irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+                print(str(out))
+        finally:
+            temp.close()
+                
+    logger.info('Manifest validation completed at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+    
+def setValidationStatusInMetsHdr(xmltext, status):
+    dom = xml.dom.minidom.parseString(xmltext)
+    metsHdr = dom.getElementsByTagName("ns1:metsHdr")
+    if not metsHdr:
+        rootElem = dom.getElementsByTagName("ns1:mets")[0]
+        metsHdr = dom.createElementNS(rootElem.namespaceURI, "ns1:metsHdr")
+        rootElem.insertBefore(metsHdr, rootElem.firstChild)
+    else:
+        metsHdr[0].setAttribute("RECORDSTATUS", status)
+    manifestXML = dom.toprettyxml(encoding="utf-8")
+    return manifestXML
+
+#python validate_mets_manifest.py -dbg -conf conf/b2safe_neo4j.conf -path /JULK_ZONE/home/irods/julia/collection_A/EUDAT_manifest_METS.xml
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='B2SAFE manifest validation')
     parser.add_argument("-confpath", help="path to the configuration file")
@@ -175,7 +229,7 @@ if __name__ == '__main__':
     parser.add_argument("-d", "--dryrun", action="store_true",
                         help="run without performing any real change")
     
-    parser.add_argument("-path", help="irods path to the data")
+    parser.add_argument("-path", help="irods path to the manifest to validate")
     
     parser.add_argument("-u", "--user", nargs=1, help="irods user")
      

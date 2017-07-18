@@ -3,14 +3,13 @@
 
 import ConfigParser
 import argparse
-import logging
 import logging.handlers
 import libmets
 import pprint
 import uuid
 
 from nested_lookup import nested_lookup
-from irodsUtility import *
+import irodsUtility
 
 logger = logging.getLogger('MetsParser')
 
@@ -216,13 +215,13 @@ def metsToDict(args):
 
     logger.info("Parsing METS manifest ...")
     if args.irods:
-        irodsu = IRODSUtils(configuration.irods_home_dir, logger,
+        irodsu = irodsUtility.IRODSUtils(configuration.irods_home_dir, logger,
                             configuration.irods_debug)
         xmltext = irodsu.getFile(args.irods[0] + '/manifest.xml')
     else:
         xmltext = args.file.read()
 
-    #pprint.pprint(mp.parse(xmltext))
+    pprint.pprint(mp.parse(xmltext))
     logger.info("Parsing completed")
 
 

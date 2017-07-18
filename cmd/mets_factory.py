@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*- 
 
 import argparse
-import logging
 import logging.handlers
 import ConfigParser
 import pprint
@@ -15,7 +14,6 @@ import tempfile
 import re
 
 from manifest.irodsUtility import IRODSUtils
-#from manifest import IRODSUtils
 from manifest.libmets import *
 
 logger = logging.getLogger('GraphDBClient')

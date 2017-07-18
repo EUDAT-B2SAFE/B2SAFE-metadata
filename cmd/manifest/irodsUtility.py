@@ -311,7 +311,14 @@ class IRODSUtils():
             return (process.returncode, [err, out])
         except:
             return -1, [None, None]
-
+    
+    #adding a metadata to iRODSobject with metadataAttributeName and metadataAttributeValue
+    def assing_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue) :
+        command = [ "imeta" , "add", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ]
+        action_proc = subprocess.Popen(command, stdout=subprocess.PIPE)
+        action_proc.wait()
+        out, err = action_proc.communicate()
+        return (out, err)
 
     def setUser(self, user):
         """Set the environment variable 'clientUserName' for the icommands"""
