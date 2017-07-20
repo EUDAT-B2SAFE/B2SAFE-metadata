@@ -753,8 +753,13 @@ class GraphDBSynchronizer():
                 newManifestPath = orderedManifests[lastIndex]
             else:
                 logger.error("unexpected number of manifests")
-        newManifestFile = self.irodsu.getFile(path +"/"+ newManifestPath)
-        oldManifestFile = self.irodsu.getFile(path +"/"+ oldManifestPath)
+        
+        newManifestFile = None
+        oldManifestFile = None
+        if newManifestPath != "":
+            newManifestFile = self.irodsu.getFile(path +"/"+ newManifestPath)
+        if oldManifestPath != "":
+            oldManifestFile = self.irodsu.getFile(path +"/"+ oldManifestPath)
         
         self.sychronizedPaths.append(path +"/"+ newManifestPath)
         
