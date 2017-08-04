@@ -170,7 +170,7 @@ class MetsManifestComparator():
                 for entry in fileSystemEntity.content():
                     self.recursiveGetFilesAndFolders(entry, directories, files)
             else:
-                print "EROR: unknown mets element found"
+                print "ERROR: unknown mets element found"
 
 
     def compareStructMapInfo(self, oldStructMap, newStructMap):

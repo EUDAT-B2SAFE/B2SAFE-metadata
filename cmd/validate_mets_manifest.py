@@ -113,6 +113,7 @@ class MetsManifestValidator():
         return fileIdList
     
     def validateManifestConsistency(self, files, mets_from_manifest):
+        self.logger.debug("Validating the consistency")
         #iterate over strucktMap get the files and look if the file is in the fileSec
         smaps = mets_from_manifest.structMap
         
@@ -129,6 +130,7 @@ class MetsManifestValidator():
         return missingFilesIDs
     
     def validateFilesExistence(self, files, irodsFiles):
+        self.logger.debug('Validating file existence')
         notExistingFiles = []
         for fileURL in files:
             if fileURL not in irodsFiles:
@@ -147,6 +149,7 @@ class MetsManifestValidator():
         
         isConsistent = True
         if missingFilesIDs:
+            self.logger.debug('missingFilesIDs: ' + str(missingFilesIDs))
             isConsistent = False
         
         if isConsistent:
@@ -157,9 +160,9 @@ class MetsManifestValidator():
 
 def executeValidation(args):
     logger.info ('Starting manifest comparison at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+    logger.debug('Manifest path: ' + args.path)
     collectionPath = args.path.rsplit('/',1)[0]
     manifestPath = args.path
-    
     configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
     configuration.parseConf();
     irodsu = IRODSUtils(configuration.irods_home_dir, logger, configuration.irods_debug)
@@ -173,42 +176,49 @@ def executeValidation(args):
         irodsFilesMap = irodsu.deepListDir(collectionPath)
         
         validator = MetsManifestValidator(collectionPath, args.debug, args.dryrun, logger)
-        validationResults = validator.validateMetsManifestFile(mets_from_manifest, irodsFilesMap[1])
+        missingFilesIDs, notExistingFiles = \
+            validator.validateMetsManifestFile(mets_from_manifest, 
+                                               irodsFilesMap[1])
         
-        missingFilesIDs = validationResults[0]
-        notExistingFiles = validationResults[1]
+        is_consistent_flag = True
+        all_files_existing_flag = True
+        if len(missingFilesIDs) > 0:
+            is_consistent_flag = False
+        if len(notExistingFiles) > 0:
+            all_files_existing_flag = False
+        
         
         #TODO: decide what is the best way to store the validation results
-        irodsu.assing_metadata(manifestPath, "VALIDATION_STATUS", "COMPLETED")
-        irodsu.assing_metadata(manifestPath, "IS_CONSISTENT", str(len(validationResults[0]) > 0))
-        irodsu.assing_metadata(manifestPath, "ALL_FILES_EXISTING", str(len(validationResults[1]) > 0))
+        irodsu.adding_metadata(manifestPath, "VALIDATION_STATUS", "COMPLETED")
+        irodsu.adding_metadata(manifestPath, "IS_CONSISTENT", str(is_consistent_flag))
+        irodsu.adding_metadata(manifestPath, "ALL_FILES_EXISTING", str(all_files_existing_flag))
         
-        logger.info("IS_CONSISTENT: "+str(len(missingFilesIDs) > 0))
+        logger.info("IS_CONSISTENT: "+str(is_consistent_flag))
         logger.info("Missing files for ID's: "+str(missingFilesIDs))   
-        logger.info("ALL_FILES_EXISTING: "+str(len(notExistingFiles) > 0))
+        logger.info("ALL_FILES_EXISTING: "+str(all_files_existing_flag))
         logger.info("Missing files with path's: "+str(notExistingFiles))
         
-        manifestXML = setValidationStatusInMetsHdr(xmltext, "VALIDATED")
+#        manifestXML = setValidationStatusInMetsHdr(xmltext, "VALIDATED")
         
-        if args.dryrun:
-            print(manifestXML)
-        else:
-            logger.info('Writing the manifest to a file')
+#        if args.dryrun:
+#            print(manifestXML)
+#        else:
+#            logger.info('Writing the manifest to a file')
             
-            temp = tempfile.NamedTemporaryFile()
-            try:
-                temp.write(manifestXML)
-                temp.flush()
-                logger.info('in the irods namespace: {}'.format(manifestPath))
-                try: 
-                    irodsu.putFile(temp.name, manifestPath, configuration.irods_resource)
-                    #irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'), configuration.irods_resource)
-                except:
-                    out = irodsu.putFile(temp.name, manifestPath)
-                    #out = irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
-                    print(str(out))
-            finally:
-                temp.close()
+#            temp = tempfile.NamedTemporaryFile()
+#            try:
+#                temp.write(manifestXML)
+#                temp.flush()
+#                logger.info('in the irods namespace: {}'.format(manifestPath))
+#                try: 
+#                    irodsu.putFile(temp.name, manifestPath, configuration.irods_resource)
+#                    #irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'), configuration.irods_resource)
+#                except:
+#                    out = irodsu.putFile(temp.name, manifestPath)
+#                    #out = irodsu.putFile(temp.name, manifestPath+"_"+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
+#                    print(str(out))
+#            finally:
+#                temp.close()
                     
         logger.info('Manifest validation completed at: '+ datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S'))
     except pyxb.exceptions_.UnrecognizedContentError:
@@ -233,13 +243,14 @@ def setValidationStatusInMetsHdr(xmltext, status):
 #python validate_mets_manifest.py -dbg -conf conf/b2safe_neo4j.conf -path /JULK_ZONE/home/irods/julia/collection_A/EUDAT_manifest_METS.xml
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='B2SAFE manifest validation')
-    parser.add_argument("-confpath", help="path to the configuration file")
+    parser.add_argument("confpath", help="path to the configuration file")
     parser.add_argument("-dbg", "--debug", action="store_true", 
                         help="enable debug")
     parser.add_argument("-d", "--dryrun", action="store_true",
                         help="run without performing any real change")
     
-    parser.add_argument("-path", help="irods path to the manifest to validate")
+    parser.add_argument("-path", required=True,
+                        help="irods path to the manifest")
     
     parser.add_argument("-u", "--user", nargs=1, help="irods user")
      

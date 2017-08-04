@@ -95,7 +95,6 @@ class GraphDBClient():
             logger.info('Node "Zone" found')
 
         self.metadata = self.pullMessage()
-        print (str(self.metadata))
 
 
     def pullMessage(self):
@@ -373,7 +372,6 @@ class GraphDBClient():
                                                "b2safe_owner_name]")
             return True
  
-#TODO add multiple owners management
         owners = None
         if absolutePath in self.metadata.keys():
             owner = self.metadata[absolutePath]['owner']
@@ -753,7 +751,9 @@ class GraphDBSynchronizer():
                 newManifestPath = orderedManifests[lastIndex]
             else:
                 logger.error("unexpected number of manifests")
+        logger.debug("new METS manifest path: " + path +"/"+ newManifestPath)
         newManifestFile = self.irodsu.getFile(path +"/"+ newManifestPath)
+        logger.debug("old METS manifest path: " + path +"/"+ oldManifestPath)
         oldManifestFile = self.irodsu.getFile(path +"/"+ oldManifestPath)
         
         self.sychronizedPaths.append(path +"/"+ newManifestPath)
@@ -863,14 +863,13 @@ def sync(args):
     
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='B2SAFE graphDB client')
-    parser.add_argument("-confpath", help="path to the configuration file")
+    parser.add_argument("confpath", help="path to the configuration file")
     parser.add_argument("-dbg", "--debug", action="store_true", 
                         help="enable debug")
     parser.add_argument("-d", "--dryrun", action="store_true",
                         help="run without performing any real change")
-    parser.add_argument("-path", help="irods path to the data")
-    
     parser.add_argument("-u", "--user", nargs=1, help="irods user")
+    parser.add_argument("path", help="irods path to the data")
     
     parser.set_defaults(func=sync) 
     

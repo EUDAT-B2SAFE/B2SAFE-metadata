@@ -179,6 +179,7 @@ class IRODSUtils():
 
         return (rc, None)
 
+
     def listDir(self, path, abs_path=True):
         """List only the content of a directory"""
         pathString = str(path)
@@ -201,7 +202,8 @@ class IRODSUtils():
             return (rc, tree)
 
         return (rc, None)
-    
+   
+ 
     def _parseColl(self, parent_path, tree, lines, abs_path=True):
 
         i = 0
@@ -312,13 +314,11 @@ class IRODSUtils():
         except:
             return -1, [None, None]
     
-    #adding a metadata to iRODSobject with metadataAttributeName and metadataAttributeValue
-    def assing_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue) :
-        command = [ "imeta" , "add", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ]
-        action_proc = subprocess.Popen(command, stdout=subprocess.PIPE)
-        action_proc.wait()
-        out, err = action_proc.communicate()
-        return (out, err)
+    def adding_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue):
+        """Add metadata to iRODSobject with metadataAttributeName and metadataAttributeValue"""
+        command = [ "imeta", "set", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ] 
+        (rc, out) = self.execute_icommand(command)
+        return (rc, out)
 
     def setUser(self, user):
         """Set the environment variable 'clientUserName' for the icommands"""
