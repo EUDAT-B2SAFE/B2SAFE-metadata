@@ -85,7 +85,36 @@ class IRODSUtils():
             return metadata
 
         return None
+    
+    def getAllMetadata(self, path):
+        """get all metadata for the file or collection under the path"""
+ 
+        option = '-C'
+        query = "SELECT COLL_NAME WHERE COLL_NAME = '" + path + "'"
+        (rc, out) = self.queryIrodsIcat(query)
+        if out.startswith('CAT_NO_ROWS_FOUND'):
+            option = '-d'
 
+        (rc, out) = self.execute_icommand(["imeta", "ls", option, path])
+        if out:
+            metadata = {}
+            lines = out.splitlines()
+            for line in lines:
+                self.logger.debug('line: ' + line)
+                if line.startswith('AVUs defined for'):
+                    continue
+                if line.startswith('None'):
+                    break
+                (name, value) = line.split(': ')
+                key = ''
+                if name.strip() == 'attribute':
+                    key = value.strip()
+                if name.strip() == 'value':
+                    metadata[key] = value.strip()
+                    
+            return metadata
+
+        return None
 
     def getChecksum(self, path):
         """get file checksum"""
@@ -179,7 +208,6 @@ class IRODSUtils():
 
         return (rc, None)
 
-
     def listDir(self, path, abs_path=True):
         """List only the content of a directory"""
         pathString = str(path)
@@ -202,8 +230,7 @@ class IRODSUtils():
             return (rc, tree)
 
         return (rc, None)
-   
- 
+    
     def _parseColl(self, parent_path, tree, lines, abs_path=True):
 
         i = 0
@@ -314,11 +341,13 @@ class IRODSUtils():
         except:
             return -1, [None, None]
     
-    def adding_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue):
-        """Add metadata to iRODSobject with metadataAttributeName and metadataAttributeValue"""
-        command = [ "imeta", "set", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ] 
-        (rc, out) = self.execute_icommand(command)
-        return (rc, out)
+    #adding a metadata to iRODSobject with metadataAttributeName and metadataAttributeValue
+    def assing_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue) :
+        command = [ "imeta" , "add", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ]
+        action_proc = subprocess.Popen(command, stdout=subprocess.PIPE)
+        action_proc.wait()
+        out, err = action_proc.communicate()
+        return (out, err)
 
     def setUser(self, user):
         """Set the environment variable 'clientUserName' for the icommands"""

@@ -7,7 +7,7 @@ import sys
 import logging
 import datetime
 import time
-import tempfile
+#import tempfile
 import xml.dom.minidom
 import pyxb
 import traceback
@@ -16,7 +16,8 @@ from xml import sax
 from manifest.libmets import fileGrpType, fileType, CreateFromDocument
 from manifest import IRODSUtils
 
-from b2safe_neo4j_client import Configuration
+import ConfigParser
+#from b2safe_neo4j_client import Configuration
 
 logger = logging.getLogger('MetsManifestValidator')
 logger.setLevel(logging.INFO)
@@ -45,21 +46,21 @@ class MetsManifestValidator():
             loglevel = 'DEBUG'
         self.logger.setLevel(self.log_level[loglevel])
         
-    def recursiveGetFilesAndFolders(self, fileSystemEntity, directories, files):
-        if type(fileSystemEntity) == fileType:
-            files[fileSystemEntity.ID] = fileSystemEntity
+    def recursiveGetFiles(self, fileEntity, groupID, files):
+        if type(fileEntity) == fileType:
+            fileName = self.getFileNameFromID(fileEntity.ID)
+            files[fileEntity.ID] = groupID + fileName
         else: 
-            if type(fileSystemEntity) == fileGrpType:
-                if not "__files__" in fileSystemEntity.ID:
-                    directories[fileSystemEntity.ID] = fileSystemEntity
-                for entry in fileSystemEntity.content():
-                    self.recursiveGetFilesAndFolders(entry, directories, files)
+            if type(fileEntity) == fileGrpType:
+                for entry in fileEntity.content():
+                    if "__files__" in fileEntity.ID:
+                        self.recursiveGetFiles(entry, groupID, files)
+                    else: 
+                        self.recursiveGetFiles(entry, groupID+self.getFileNameFromID(fileEntity.ID), files)
             else:
                 logger.error("unknown mets element found")
                 
-    def getFilesAndDirectories(self, groups):
-        resultDict = {}
-        
+    def getFiles(self, groups):
         for fileGrpElement in groups:
             if fileGrpElement.ID is None:
                 conten = fileGrpElement.content()
@@ -68,17 +69,15 @@ class MetsManifestValidator():
                     print "Invalid Input file."
                 fileGrpElement = conten[0]
             
-            directories = {}
             files = {}
-            
             if (fileGrpElement.ID is not None) & (len(fileGrpElement.content()) != 0):
-                self.recursiveGetFilesAndFolders(fileGrpElement, directories, files)
+                self.recursiveGetFiles(fileGrpElement, "", files)
             
-            resultDict["directories"] = directories
-            resultDict["files"] = files
-        
-        
-        return resultDict
+        return files
+    
+    def getFileNameFromID(self, FileID):
+            fileName = FileID.rsplit('_',1)[0]
+            return fileName
 
     def getIrodsFilesRec(self, files, path, irodsFilesMap):
         for key, val in irodsFilesMap.iteritems():
@@ -86,15 +85,13 @@ class MetsManifestValidator():
                 filePrefix = path+"/"
                 filePrefix = "_"+filePrefix[self.irods_home_path.rindex("/")+1:]
                 for f in val:
-                    files.append((filePrefix+f).replace("/","_"))
+                    files.append((filePrefix+f).replace("/","_").replace(":","___"))
             else:
                 self.getIrodsFilesRec(files, key, val)
 
     def getIrodsFiles(self, irodsFilesMap):
         files = []
-        
         self.getIrodsFilesRec(files, None, irodsFilesMap)
-        
         return files
         
     def createFileIdListRec(self, fileIdList, div):
@@ -132,19 +129,17 @@ class MetsManifestValidator():
     def validateFilesExistence(self, files, irodsFiles):
         self.logger.debug('Validating file existence')
         notExistingFiles = []
-        for fileURL in files:
-            if fileURL not in irodsFiles:
-                notExistingFiles.append(fileURL)
+        for key, fileElem in files.iteritems():
+            if fileElem not in irodsFiles:
+                notExistingFiles.append(fileElem)
         return notExistingFiles
     
     def validateMetsManifestFile(self, mets_from_manifest, irodsFilesMap):
-        self.logger.debug('Begin comparing manifest files')
+        self.logger.debug('Begin validation of manifest'+str(mets_from_manifest))
         
         #collect all files from fileSec
         fileSec = mets_from_manifest.fileSec
-        filesAndDirectories = self.getFilesAndDirectories(fileSec.fileGrp)
-        
-        files = filesAndDirectories["files"]
+        files = self.getFiles(fileSec.fileGrp)
         missingFilesIDs = self.validateManifestConsistency(files, mets_from_manifest)
         
         isConsistent = True
@@ -152,10 +147,11 @@ class MetsManifestValidator():
             self.logger.debug('missingFilesIDs: ' + str(missingFilesIDs))
             isConsistent = False
         
+        notExistingFiles = []
         if isConsistent:
             irodsFiles = self.getIrodsFiles(irodsFilesMap)
             notExistingFiles = self.validateFilesExistence(files, irodsFiles)
-        
+            self.logger.debug('notExistingFiles: ' + str(notExistingFiles))
         return missingFilesIDs, notExistingFiles
 
 def executeValidation(args):
@@ -163,9 +159,25 @@ def executeValidation(args):
     logger.debug('Manifest path: ' + args.path)
     collectionPath = args.path.rsplit('/',1)[0]
     manifestPath = args.path
-    configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
-    configuration.parseConf();
-    irodsu = IRODSUtils(configuration.irods_home_dir, logger, configuration.irods_debug)
+    
+    #configuration = Configuration(args.confpath, args.debug, args.dryrun, logger)
+    #configuration.parseConf();
+    
+    config = ConfigParser.RawConfigParser()
+    with open(args.confpath, "r") as confFile:
+        config.readfp(confFile)
+            
+    irods_home_dir = ""
+    if (config.has_option('iRODS', 'irods_home_dir')):
+        irods_home_dir = config.get('iRODS', 'irods_home_dir')
+    
+    irods_debug = False
+    if (config.has_option('iRODS', 'irods_debug')):
+        opt = config.get('iRODS', 'irods_debug')
+        if opt in ['True', 'true']: 
+            irods_debug = True
+        
+    irodsu = IRODSUtils(irods_home_dir, logger, irods_debug)
     if args.user:
         irodsu.setUser(args.user[0])
     
@@ -227,7 +239,7 @@ def executeValidation(args):
         logger.error("SAXParseException: "+traceback.format_exc())
     except:
         logger.error(traceback.format_exc())
-    
+            
 def setValidationStatusInMetsHdr(xmltext, status):
     dom = xml.dom.minidom.parseString(xmltext)
     metsHdr = dom.getElementsByTagName("ns1:metsHdr")

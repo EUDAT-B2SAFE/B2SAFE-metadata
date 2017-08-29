@@ -4,11 +4,12 @@
 #import argparse
 #import json
 import logging
-#import os
+import os
 #import sys
 import pprint
 import collections
 import xml.dom.minidom
+import uuid
 
 from manifest.libmets import fileGrpType, fileType, divType
 #from manifest.libmets import fileGrpType, fileType, CreateFromDocument, divType
@@ -71,6 +72,34 @@ class MetsManifestComparator():
         result["deletedLinks"] = deletedLinks
         return result
 
+    def sortOutDeletedLinks(self, linksDiff, oldFileSec, newFileSec, rootPath):
+        deletedLinks = []
+        disconnectedLinks = linksDiff["deletedLinks"]
+        
+        oldFiles = self.getFilesAndDirectories(oldFileSec.fileGrp)["files"]
+        newFiles = self.getFilesAndDirectories(newFileSec.fileGrp)["files"]
+        for pathToLinkedMets in disconnectedLinks:
+            path = pathToLinkedMets
+            irodsPathToLinkedMets = rootPath + path.replace("file:/","")
+            fileName = irodsPathToLinkedMets.rsplit('/',1)[1]
+            linkedMetsID = '_' + fileName + '_'
+            #search in old and new fileSruct, if in old but not in new then delete 
+            #from disconnected add to deleted
+            isInOldManifest = False
+            isInNewManifest = False
+            for oldFileID in oldFiles.keys():
+                if linkedMetsID in oldFileID:
+                    isInOldManifest = True
+            for newFileID in newFiles.keys():
+                if linkedMetsID in newFileID:
+                    isInNewManifest = True
+            if isInOldManifest and not isInNewManifest:
+                disconnectedLinks.remove(pathToLinkedMets)
+                deletedLinks.append(pathToLinkedMets)
+        
+        linksDiff["deletedLinks"] = deletedLinks
+        linksDiff["disconnectedLinks"] = disconnectedLinks
+    
     def compareMetsManifestFiles(self, oldmets, newmets):
         self.logger.debug('Begin comparing manifest files')
         changes = {}

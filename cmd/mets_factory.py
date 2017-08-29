@@ -12,6 +12,8 @@ import json
 import fnmatch
 import tempfile
 import re
+import datetime
+import time
 
 from manifest.irodsUtility import IRODSUtils
 from manifest.libmets import *
@@ -111,7 +113,9 @@ class MetsManifest():
             fgrp_files = fileGrpType(ID=groupId+'__files__')
             for fp in dirs[coll]['__files__']:
                 # loop over the files of the collection
-                fileId = '_' + fp + '_' + str(uuid.uuid3(uuid.NAMESPACE_DNS, parent+os.sep+fp))
+                if ":" in fp:
+                    fp = fp.replace(":", "___")
+                fileId = '_' + fp + '_' + str(uuid.uuid3(uuid.NAMESPACE_DNS, (parent+os.sep+fp).encode("utf8")))
                 ft = fileType(ID=fileId)
                 # create a METS element FLocat
                 loc = CTD_ANON_19(LOCTYPE='URL')
@@ -376,7 +380,7 @@ def writeMets(args):
     if args.dryrun:
         print(manifestXML)
     else:
-        target = root_path + os.sep + 'manifest.xml'
+        target = root_path + os.sep + 'EUDAT_manifest_METS.'+datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d.%H:%M:%S')+'.xml'
         logger.info('Writing the manifest to a file')
         if args.filesystem:
             logger.info('in the file system: {}'.format(target))
