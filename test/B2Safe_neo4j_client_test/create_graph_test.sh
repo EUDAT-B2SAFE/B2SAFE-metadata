@@ -6,6 +6,7 @@ SCRIPT_HOME=/home/irods/B2SAFE-core/scripts/metadata
 B2SAFE_NEO4J_CLIENT=${SCRIPT_HOME}/b2safe_neo4j_client.py
 METS_FACTORY=${SCRIPT_HOME}/mets_factory.py
 IRODS_HOME_PATH=/JULK_ZONE/home/irods/julia
+IRODS_USER=irods
 
 #clear iRODS / create new folder in iRODS
 irm -r ${IRODS_HOME_PATH}/collection_A/
@@ -25,4 +26,4 @@ sleep 1
 python ${METS_FACTORY} -dbg -i ${IRODS_HOME_PATH}/collection_A $(pwd)/conf/mets_factory.conf
 
 #create graph
-python ${B2SAFE_NEO4J_CLIENT} -dbg -u irods $(pwd)/conf/b2safe_neo4j.conf ${IRODS_HOME_PATH}/collection_A
+python ${B2SAFE_NEO4J_CLIENT} -dbg -u ${IRODS_USER} $(pwd)/conf/b2safe_neo4j.conf ${IRODS_HOME_PATH}/collection_A

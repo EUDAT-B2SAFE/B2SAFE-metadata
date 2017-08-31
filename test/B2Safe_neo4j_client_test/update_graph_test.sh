@@ -2,11 +2,12 @@
 
 set -x
 
+IRODS_USER=irods
 SCRIPT_HOME=/home/irods/B2SAFE-core/scripts/metadata
 B2SAFE_NEO4J_CLIENT=${SCRIPT_HOME}/b2safe_neo4j_client.py
 METS_FACTORY=${SCRIPT_HOME}/mets_factory.py
 IRODS_HOME_PATH=/JULK_ZONE/home/irods/julia
-OLD_MANIFEST_NAME=$(ils /JULK_ZONE/home/irods/julia/collection_A/ | grep EUDAT_manifest_METS* | sed 's/^[ \t]*//;s/[ \t]*$//')
+OLD_MANIFEST_NAME=$(ils ${IRODS_HOME_PATH}/collection_A/ | grep EUDAT_manifest_METS | sed 's/^[ \t]*//;s/[ \t]*$//')
 
 iget -r ${IRODS_HOME_PATH}/collection_A/${OLD_MANIFEST_NAME}
 
@@ -31,7 +32,7 @@ python ${METS_FACTORY} -dbg -i ${IRODS_HOME_PATH}/collection_A $(pwd)/conf/mets_
 iput -f ${OLD_MANIFEST_NAME} ${IRODS_HOME_PATH}/collection_A/
 
 #update graph
-python ${B2SAFE_NEO4J_CLIENT} -dbg -u irods $(pwd)/conf/b2safe_neo4j.conf ${IRODS_HOME_PATH}/collection_A 
+python ${B2SAFE_NEO4J_CLIENT} -dbg -u ${IRODS_USER} $(pwd)/conf/b2safe_neo4j.conf ${IRODS_HOME_PATH}/collection_A 
 
 #clean up
 rm -r collection_A $(pwd)/conf/metadata.json ${OLD_MANIFEST_NAME}
