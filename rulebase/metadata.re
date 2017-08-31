@@ -48,7 +48,7 @@ EUDATObjectNameSplit(*objectName, *main, *extension) {
 }
 
 
-EUDATValidateManifest(*path, *user) {
+EUDATIsManifestValid(*path, *user) {
 
     getMetadataConfParameters(*mdConfPath)
 
@@ -71,13 +71,13 @@ EUDATValidateManifest(*path, *user) {
         fail;
     }
 
-    msiExecCmd("validate_mets_manifest.py","*mdConfPath -u *user -path '*mpath'",
-               "null", "null", "null", *outValMet);
-    msiGetStdoutInExecCmdOut(*outValMet, *resp);
-    getConfParameters(*msiFreeEnabled, *msiCurlEnabled, *authzEnabled);
-    if (*msiFreeEnabled) {
-        msifree_microservice_out(*outValMet);
-    }
+#    msiExecCmd("validate_mets_manifest.py","*mdConfPath -u *user -path '*mpath'",
+#               "null", "null", "null", *outValMet);
+#    msiGetStdoutInExecCmdOut(*outValMet, *resp);
+#    getConfParameters(*msiFreeEnabled, *msiCurlEnabled, *authzEnabled);
+#    if (*msiFreeEnabled) {
+#        msifree_microservice_out(*outValMet);
+#    }
 
     *validation = bool("false");
     EUDATgetLastAVU(*mpath, "VALIDATION_STATUS", *valid_status);
@@ -87,6 +87,9 @@ EUDATValidateManifest(*path, *user) {
         if (*file_exist == "True" && *is_consistent == "True") {
             *validation = bool("true");
         }
+    }
+    else {
+        writeLine("serverLog","INFO: the manifest *mpath has not been validated");
     }
 
     *validation;
@@ -112,31 +115,6 @@ EUDATStoreMetadata(*collPath, *user) {
     msiExecCmd("b2safe_neo4j_client.py"," -u *user '*mdConfPath' '*collPath'",
                "null", "null", "null", *outMdStore);
     msiGetStdoutInExecCmdOut(*outMdStore, *resp);
-    getConfParameters(*msiFreeEnabled, *msiCurlEnabled, *authzEnabled);
-    if (*msiFreeEnabled) {
-        msifree_microservice_out(*outMdStore);
-    }
-}
-
-
-EUDATCheckAndUpdateMetadata(*collPath, *user) {
-
-# list the manifest versions in a collection
-# choose the two most recent ones
-#
-# if there are at least two
-#   trigger the neo4client to get the differences
-# else
-#   trigger the neo4client to validate the manifest
-    if (EUDATValidateManifest(*collPath, *user)) {
-    # if it is valid create a new graph
-        writeLine("serverLog","DEBUG: the collection *collPath has a valid manifest");
-        EUDATStoreMetadata(*collPath, *user);
-    }
-    else {
-    # mark as not valid
-        writeLine("serverLog","DEBUG: the collection *collPath has not a valid manifest");
-    }
 }
 
 
