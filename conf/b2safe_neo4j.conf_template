@@ -14,7 +14,7 @@ path=/db/data/
 [MessageSystem]
 token=
 endpoint=https://messaging-devel.argo.grnet.gr/v1/projects/EUDAT2020
-buffer=100
+buffer=1
 subscription=B2SAFE_NOTIFY
 
 [iRODS]

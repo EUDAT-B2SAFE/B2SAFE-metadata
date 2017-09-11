@@ -96,18 +96,36 @@ class GraphDBClient():
                         logger.warning('Graph error: %s', ge)
         else:
             logger.info('Node "Zone" found')
+        
+        coll_names = {}
+        while True:
+            coll_meta = self.pullMessage()
+            if len(coll_meta) == 0: break
+            coll_names.update(coll_meta)
+        self.metadata = {}
+        for coll in coll_names:
+            while True:
+                metadata = self.pullMessage(coll_names[coll]['md5hash'] + '_NOTIFY')
+                if len(metadata) == 0: break
+                self.metadata.update(metadata)
+            self.deleteTopic(coll_names[coll]['md5hash'])
+            self.deleteSub(coll_names[coll]['md5hash'] + '_NOTIFY')
 
-        self.metadata = self.pullMessage()
 
-
-    def pullMessage(self):
+    def pullMessage(self, subscription = None, buffer_length = None):
         """Pulls a set of messages from a message queue, according to a 
            predefined buffer length, and removes them from the queue.
            Return a dictionary of the messages' key-value pairs.
         """
         metadata = {}
-        num = self.conf.msg_buffer
-        sub = self.conf.msg_subscription
+        if subscription is None:
+            sub = self.conf.msg_subscription
+        else:
+            sub = subscription
+        if buffer_length is None:
+            num = self.conf.msg_buffer
+        else:
+            num = buffer_length
         logger.info('Reading {} messages from subscription {}'.format(num,sub))
         if sub is not None: 
             session = requests.Session()
@@ -124,7 +142,12 @@ class GraphDBClient():
             dataids = {'ackIds': []}
             for rmessage in res_dict['receivedMessages']:
                 content = base64.standard_b64decode(rmessage['message']['data'])
-                metadata.update(self.msgToDict(content))
+                logger.debug('Content decoded: ' + content)
+                if subscription is None:
+                    hashed_content = hashlib.md5(content).hexdigest()
+                    metadata.update({content:{'md5hash':hashed_content}})
+                else:
+                    metadata.update(self.msgToDict(content))
                 dataids['ackIds'].append(rmessage['ackId'])
             logger.debug('Removing messages')
             postdataids = json.dumps(dataids)
@@ -139,24 +162,56 @@ class GraphDBClient():
 
     def msgToDict(self, message):
         """Transforms the message content to a dictionary"""
-        #msg_dict = {}
+        # { /cinecaDMPZone2/home/claudio/testSuite:{ owner:claudio, objects: [] } }
         pair = message.split(":", 1)
         collection = pair[0].strip(" {")
         msg_dict = {collection: {}}
         second_pair = pair[1].split("objects:", 1)
         coll_attrs = second_pair[0].strip(" ,{").split(",")
         for attr in coll_attrs:
-            key,val = attr.split(":")
-            msg_dict[collection][key] = val
+            if len(attr) > 0 and ":" in attr:
+                key,val = attr.split(":")
+                msg_dict[collection][key] = val
         objs_attrs = second_pair[1].strip(" []}").split(",")
         for attr in objs_attrs:
-            name,key,val = attr.split("=:=")
-            path = collection + "/" + name
-            if path in msg_dict.keys():
-                msg_dict[path][key] = val
-            else:
-                msg_dict[path] = {key:val}
+            if len(attr) > 0 and "=:=" in attr:
+                name,key,val = attr.split("=:=")
+                path = collection + "/" + name
+                if path in msg_dict.keys():
+                    msg_dict[path][key] = val
+                else:
+                    msg_dict[path] = {key:val}
         return msg_dict
+
+
+    def deleteTopic(self, name):
+        """Delete the queue/topic"""
+
+        logger.info('Deleting the topic {}'.format(name))
+        session = requests.Session()
+        payload = {'key': self.conf.msg_token}
+        endpoint = self.conf.msg_endpoint
+        headers = {'Accept': 'application/json'}
+        res = session.delete(endpoint + '/topics/' + name.strip(),
+                             headers=headers, params=payload)
+        logger.debug('Status code: {}'.format(str(res.status_code)))
+        logger.debug('Response: {}'.format(res.text))
+        return res.text
+
+
+    def deleteSub(self, name):
+        """Delete a subscription"""
+
+        logger.info('Deleting the subscription {}'.format(name))
+        session = requests.Session()
+        payload = {'key': self.conf.msg_token}
+        endpoint = self.conf.msg_endpoint        
+        headers = {'Content-Type': 'application/json'}
+        res = session.delete(endpoint + '/subscriptions/' + name.strip(),
+                             headers=headers, params=payload)
+        logger.debug('Status code: {}'.format(str(res.status_code)))
+        logger.debug('Response: {}'.format(res.text))
+        return res.text
 
 
 # dynamic data ###################################
@@ -170,6 +225,15 @@ class GraphDBClient():
         """This is the main function responsible to read the manifest 
            dictionary in input and create the graph as result.
         """
+        # check the difference between collPath and self.root
+        parentColl = ""
+        if self.root in collPath:
+            diffPath = collPath.replace(self.root, "")
+            logger.debug('path difference: ' + diffPath)
+            diffs = diffPath.rsplit('/',1)
+            if (diffs is not None) and (len(diffs) > 1):
+                parentColl = diffs[0].lstrip('/')
+        logger.debug('parent collection: ' + parentColl)
         # start to look if the node has nested objects
         if len(d['nestedObjects']) > 0:
 
@@ -193,10 +257,14 @@ class GraphDBClient():
                     and len(d['filePaths'][d['filePaths'].keys()[0]]) == 1):
                     pathId = d['filePaths'].keys()[0]
                     path = d['filePaths'][pathId][0]
-                    if self.conf.dryrun: 
-                        print "get the checksum based on path: " + str(path)
+                    if len(parentColl) > 0:
+                        aggPath = parentColl + '/' + path[7:]
                     else:
-                        agg.properties['location'] = path[7:]
+                        aggPath = path[7:]
+                    if self.conf.dryrun: 
+                        print "get the checksum based on path: " + str(aggPath)
+                    else:
+                        agg.properties['location'] = aggPath
                         agg.push()
                         logger.debug('Updated location of entity: ' + str(agg))
                         agg = self._defineDigitalEntity(None, path[7:], 
@@ -224,7 +292,11 @@ class GraphDBClient():
             if len(d['filePaths']) > 0:
                 for fid in d['filePaths']:
                     for fp in d['filePaths'][fid]:
-                        de = self._defineDigitalEntity(d['name'], fp[7:], 
+                        if len(parentColl) > 0:
+                            dePath = parentColl + '/' + fp[7:]
+                        else:
+                            dePath = fp[7:]
+                        de = self._defineDigitalEntity(d['name'], dePath, 
                                                        d['type'], fid)
                         leafs.append(de)
             # if there is not a path, the leaf is an aggregation, even if an empty one.
@@ -291,7 +363,8 @@ class GraphDBClient():
         #path = de.properties["location"]
         sumValue = de.properties["checksum"]
         pid = None
-        if absolutePath in self.metadata.keys():
+        if (absolutePath in self.metadata.keys() 
+            and 'PID' in self.metadata[absolutePath].keys()):
             pid = self.metadata[absolutePath]['PID']
         if pid:
             pidNode = Node("PersistentIdentifier", value = pid,
@@ -339,7 +412,8 @@ class GraphDBClient():
 
         parent = None
         master = None
-        if absolutePath in self.metadata.keys():
+        if (absolutePath in self.metadata.keys()
+            and 'EUDAT/ROR' in self.metadata[absolutePath].keys()):
             master = self.metadata[absolutePath]['EUDAT/ROR']
         if master:
             pid = self.metadata[absolutePath]['PID']
@@ -377,9 +451,10 @@ class GraphDBClient():
  
         owners = None
         if absolutePath in self.metadata.keys():
+            logger.debug('found the path: ' + absolutePath)
             owner = self.metadata[absolutePath]['owner']
             owners = [owner]
-        logger.debug('Got the list of owners: ' + str(owners))
+        logger.debug('Got the list of owners for path [' + absolutePath + ']: ' + str(owners))
         if owners:
             for owner in owners:
                 person = self.graph.merge_one("Person", "name", owner)
@@ -431,8 +506,11 @@ class GraphDBClient():
             return entityNew
         else:
             # check if the node is already stored in the graph DB
-            # basing the search on the property which is unique: the name
-            entity = self.graph.find_one(eudat_type, "name", name)
+            # basing the search on the property which is unique
+            if eudat_type == 'DigitalEntity':
+                entity = self.graph.find_one(eudat_type, "location", path)
+            else:
+                entity = self.graph.find_one(eudat_type, "name", name)
             if entity is None:
                 entity = entityNew
                 self.graph.create(entity)
