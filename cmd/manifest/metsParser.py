@@ -3,14 +3,13 @@
 
 import ConfigParser
 import argparse
-import logging
 import logging.handlers
 import libmets
 import pprint
 import uuid
 
 from nested_lookup import nested_lookup
-from irodsUtility import *
+import irodsUtility
 
 logger = logging.getLogger('MetsParser')
 
@@ -49,6 +48,13 @@ class MetsParser(object):
                 pathList = self._pathListExtractor(fptr_element.FILEID,
                                                    fileGroups)
                 filePaths[fptr_element.FILEID] = pathList
+            #analyse smap, collect all mptr in a list with path's
+            linkedMets = []
+            for mptr_element in div_element.mptr:
+                pathToLinkedMets = mptr_element.href
+                linkedMets.append(pathToLinkedMets)
+            
+            obj['linkedMets'] = linkedMets
             obj['filePaths'] = filePaths
             obj['nestedObjects'] = self._parseDivType(div_element.div,
                                                       fileGroups)
@@ -119,7 +125,7 @@ class MetsParser(object):
                                          + (mets.toxml("utf-8",
                                                        element_name='mets'))))
         groups = self._parseFileGrpType(mets.fileSec.fileGrp)
-        collMaps = []
+        collMaps = {}
         for smap in mets.structMap:
             name = smap.div.LABEL
             if smap.div.LABEL is None:
@@ -130,16 +136,16 @@ class MetsParser(object):
             for fptr_element in smap.div.fptr:
                 self.logger.debug('FPTR: ' + fptr_element.FILEID)
                 pathList = self._pathListExtractor(fptr_element.FILEID,
-                                                   fileGroups)
+                                                   mets.fileSec.fileGrp)
                 filePaths += pathList
-
+            
             collectionMap = {'name': name,
                              'type': smap.div.TYPE,
                              'filePaths': filePaths,
                              'nestedObjects': collectionObjs}
             self.logger.debug('Structural map: '
                               + pprint.pformat(collectionMap))
-            collMaps.append(collectionMap)
+            collMaps[name] = collectionMap
 
         return collMaps
 
@@ -209,7 +215,7 @@ def metsToDict(args):
 
     logger.info("Parsing METS manifest ...")
     if args.irods:
-        irodsu = IRODSUtils(configuration.irods_home_dir, logger,
+        irodsu = irodsUtility.IRODSUtils(configuration.irods_home_dir, logger,
                             configuration.irods_debug)
         xmltext = irodsu.getFile(args.irods[0] + '/manifest.xml')
     else:

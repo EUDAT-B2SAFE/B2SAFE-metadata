@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 # -*- python -*-
 
-import subprocess
+import json
 import logging
 import os
-import json
+import subprocess
 
 
 ##############################################################################
 # iRODS Admin Utility Class #
 ##############################################################################
-
 class IRODSUtils():
     """ 
     utility for irods management
@@ -39,8 +38,11 @@ class IRODSUtils():
         if resource is not None:
             cmdList += ['-R', resource]
         cmdList += [path, '-']
-        (rc, out) = self.execute_icommand(cmdList)
-        return out
+        try:
+            (rc, out) = self.execute_icommand(cmdList)
+            return out
+        except:
+            return None
 
    
     def putFile(self, source, destination, resource=None):
@@ -83,7 +85,36 @@ class IRODSUtils():
             return metadata
 
         return None
+    
+    def getAllMetadata(self, path):
+        """get all metadata for the file or collection under the path"""
+ 
+        option = '-C'
+        query = "SELECT COLL_NAME WHERE COLL_NAME = '" + path + "'"
+        (rc, out) = self.queryIrodsIcat(query)
+        if out.startswith('CAT_NO_ROWS_FOUND'):
+            option = '-d'
 
+        (rc, out) = self.execute_icommand(["imeta", "ls", option, path])
+        if out:
+            metadata = {}
+            lines = out.splitlines()
+            for line in lines:
+                self.logger.debug('line: ' + line)
+                if line.startswith('AVUs defined for'):
+                    continue
+                if line.startswith('None'):
+                    break
+                (name, value) = line.split(': ')
+                key = ''
+                if name.strip() == 'attribute':
+                    key = value.strip()
+                if name.strip() == 'value':
+                    metadata[key] = value.strip()
+                    
+            return metadata
+
+        return None
 
     def getChecksum(self, path):
         """get file checksum"""
@@ -156,11 +187,11 @@ class IRODSUtils():
     
     def deepListDir(self, path, abs_path=True):
         """List recursively the content of a directory"""
-
-        self.logger.debug('Listing recursively the path: ' + path)
+        pathString = str(path)
+        self.logger.debug('Listing recursively the path: ' + pathString)
 #TODO in case of memory issue for large collections, consider to use
 # a shelve object instead of a dictionary.
-        (rc, out) = self.execute_icommand(["ils", "-r", path])
+        (rc, out) = self.execute_icommand(["ils", "-r", pathString])
         if out is not None:
             tree = {}
             fpath = ''
@@ -177,6 +208,28 @@ class IRODSUtils():
 
         return (rc, None)
 
+    def listDir(self, path, abs_path=True):
+        """List only the content of a directory"""
+        pathString = str(path)
+        self.logger.debug('Listing the path: ' + pathString)
+        #TODO in case of memory issue for large collections, consider to use
+        # a shelve object instead of a dictionary.
+        (rc, out) = self.execute_icommand(["ils", pathString])
+        if out is not None:
+            tree = {}
+            fpath = ''
+            i = 0
+            lines = out.splitlines()
+            if lines and len(lines) > 0:
+                # split the root path in parent and child(relative or absolute)
+                parent, fpath = self._pathSplit(lines[0].strip()[:-1], abs_path)
+                # recursive loop over collections
+                tree[fpath], ind = self._parseColl(fpath, {'__files__': []}, 
+                                                   lines[1:], abs_path)
+
+            return (rc, tree)
+
+        return (rc, None)
     
     def _parseColl(self, parent_path, tree, lines, abs_path=True):
 
@@ -287,7 +340,14 @@ class IRODSUtils():
             return (process.returncode, [err, out])
         except:
             return -1, [None, None]
-
+    
+    #adding a metadata to iRODSobject with metadataAttributeName and metadataAttributeValue
+    def assing_metadata(self, iRODSobject, metadataAttributeName, metadataAttributeValue) :
+        command = [ "imeta" , "add", "-d", iRODSobject, metadataAttributeName, metadataAttributeValue ]
+        action_proc = subprocess.Popen(command, stdout=subprocess.PIPE)
+        action_proc.wait()
+        out, err = action_proc.communicate()
+        return (out, err)
 
     def setUser(self, user):
         """Set the environment variable 'clientUserName' for the icommands"""

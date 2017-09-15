@@ -1,0 +1,5 @@
+B2SAFE metadata package 0.1.0 [2017/09/15]
+- initial proof of concept
+- support for manifest automatic generation and validation
+- support for system metadata extraction and gathering via messaging system
+- support for graph creation and updating

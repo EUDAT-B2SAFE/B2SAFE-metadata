@@ -1,0 +1,25 @@
+Metadata component is an extension of the B2SAFE core package (https://github.com/EUDAT-B2SAFE/B2SAFE-core).
+To install it you have to do following steps:
+
+- install the software the metadata component relies to:
+ - iRODS
+ - B2SAFE
+ - Neo4j
+ - messaging system (optional)
+ - python
+ - py2neo library v2.0.8
+
+
+- clone (master branch) the metadata component from GitHub https://github.com/EUDAT-B2SAFE/B2SAFE-metadata.git
+- add all folders except "rulebase" to <your path to B2SAFE>/B2SAFE-core/scripts/metadata 
+	and the rules from rulebase folder to the "rulebase" folder of your iRODS instance <your path to B2SAFE>/B2SAFE-core/rulebase
+- modify configuration files according to your environment as described in "Configuration files" page of the wiki
+- check for missing python libraries trying to run the major scripts (under <your path to B2SAFE>/B2SAFE-core/scripts/metadata/cmd/) with -d (dry run) option
+    - mets_factory.py
+    - b2safe_neo4j_client.py
+Try to install missing packages with the standard package manager like apt, yum, zypper etc.
+If packages are not within the standards install and use pip to install the missing packages.
+
+- test with the test scripts under <your path to B2SAFE>/B2SAFE-core/scripts/metadata/test/B2Safe_neo4j_client_test. Be aware that then your neo4j DB needs to be cleaned up, as the test will create a graph containing "collection_A" in the name of the root node with type "digitalCollection".
+
+As described in the "Architecture" page of the wiki, the iRODS rules trigger the scripts except the b2safe_neo4j_client.py for that a cronjob is needed.

@@ -1341,7 +1341,7 @@ Namespace.addCategoryObject('typeBinding', 'mdSecType', mdSecType)
 # Complex type [anonymous] with content type ELEMENT_ONLY
 class CTD_ANON_5 (pyxb.binding.basis.complexTypeDefinition):
     """
-									The xml data wrapper element <xmlData> is used to contain XML encoded metadata. The content of an <xmlData> element can be in any namespace or in no namespace. As permitted by the XML Schema Standard, the processContents attribute value for the metadata in an <xmlData> is set to “lax”. Therefore, if the source schema and its location are identified by means of an XML schemaLocation attribute, then an XML processor will validate the elements for which it can find declarations. If a source schema is not identified, or cannot be found at the specified schemaLocation, then an XML validator will check for well-formedness, but otherwise skip over the elements appearing in the <xmlData> element. 												
+									The xml data wrapper element <xmlData> is used to contain XML encoded metadata. The content of an <xmlData> element can be in any namespace or in no namespace. As permitted by the XML Schema Standard, the processContents attribute value for the metadata in an <xmlData> is set to â€œlaxâ€. Therefore, if the source schema and its location are identified by means of an XML schemaLocation attribute, then an XML processor will validate the elements for which it can find declarations. If a source schema is not identified, or cannot be found at the specified schemaLocation, then an XML validator will check for well-formedness, but otherwise skip over the elements appearing in the <xmlData> element. 												
 								"""
     _TypeDefinition = None
     _ContentTypeTag = pyxb.binding.basis.complexTypeDefinition._CT_ELEMENT_ONLY
@@ -1418,7 +1418,7 @@ class CTD_ANON_6 (pyxb.binding.basis.complexTypeDefinition):
 # Complex type [anonymous] with content type ELEMENT_ONLY
 class CTD_ANON_7 (pyxb.binding.basis.complexTypeDefinition):
     """
-									An xml data wrapper element <xmlData> is used to contain  an XML encoded file. The content of an <xmlData> element can be in any namespace or in no namespace. As permitted by the XML Schema Standard, the processContents attribute value for the metadata in an <xmlData> element is set to “lax”. Therefore, if the source schema and its location are identified by means of an xsi:schemaLocation attribute, then an XML processor will validate the elements for which it can find declarations. If a source schema is not identified, or cannot be found at the specified schemaLocation, then an XML validator will check for well-formedness, but otherwise skip over the elements appearing in the <xmlData> element.
+									An xml data wrapper element <xmlData> is used to contain  an XML encoded file. The content of an <xmlData> element can be in any namespace or in no namespace. As permitted by the XML Schema Standard, the processContents attribute value for the metadata in an <xmlData> element is set to â€œlaxâ€. Therefore, if the source schema and its location are identified by means of an xsi:schemaLocation attribute, then an XML processor will validate the elements for which it can find declarations. If a source schema is not identified, or cannot be found at the specified schemaLocation, then an XML validator will check for well-formedness, but otherwise skip over the elements appearing in the <xmlData> element.
 								"""
     _TypeDefinition = None
     _ContentTypeTag = pyxb.binding.basis.complexTypeDefinition._CT_ELEMENT_ONLY
@@ -1573,7 +1573,7 @@ class CTD_ANON_10 (fileGrpType):
 -- one <fileGrp> for the thumbnails of the images
 -- one <fileGrp> for the higher resolution JPEGs of the image 
 -- one <fileGrp> for the master archival TIFFs of the images 
-For a text resource with a variety of content file types one might group the content files at the highest level by type,  and then use the <fileGrp> element’s nesting capabilities to subdivide a <fileGrp> by format within the type, such as:
+For a text resource with a variety of content file types one might group the content files at the highest level by type,  and then use the <fileGrp> elementâ€™s nesting capabilities to subdivide a <fileGrp> by format within the type, such as:
 -- one <fileGrp> for all of the page images with nested <fileGrp> elements for each image format/resolution (tiff, jpeg, gif)
 -- one <fileGrp> for a PDF version of all the pages of the document 
 -- one <fileGrp> for  a TEI encoded XML version of the entire document or each of its pages.
