@@ -1,7 +1,7 @@
 Metadata component is an extension of the B2SAFE core package (https://github.com/EUDAT-B2SAFE/B2SAFE-core).
 To install it you have to do following steps:
 
-- install the software the metadata component relays to:
+- install the software the metadata component relies to:
  - iRODS
  - B2SAFE
  - Neo4j
@@ -22,4 +22,4 @@ If packages are not within the standards install and use pip to install the miss
 
 - test with the test scripts under <your path to B2SAFE>/B2SAFE-core/scripts/metadata/test/B2Safe_neo4j_client_test. Be aware that then your neo4j DB needs to be cleaned up, as the test will create a graph containing "collection_A" in the name of the root node with type "digitalCollection".
 
-As described in the Workflow, the iRODS rules trigger the scripts except the b2safe_neo4j_client.py for that a cronjob is needed.
+As described in the "Architecture" page of the wiki, the iRODS rules trigger the scripts except the b2safe_neo4j_client.py for that a cronjob is needed.
