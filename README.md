@@ -2,15 +2,17 @@ B2SAFE Metadata Management
 ===========
 
 This set of scripts aims to get metadata from the B2SAFE service and upload them to a GraphDB (Neo4J).
-They rely on the py2neo library v2.0.8.  
+They have been tested with the py2neo library v2.0.8.  
 
-There are three main scripts:
+There are two main scripts:
  * mets_factory.py: it takes the path of a collection and a document describing the data-metadata relations, as inputs, and builds an XML document, which represents the manifest of that collection. The collection path can be file system based or part of the irods namespace. The data-metadata relation document has to be compliant with the json-ld format and the EUDAT controlled vocabulary, while the manifest is a METS formatted document.
  If the collection specified contains a subcollection that aleady has a METS formated manifest, then a link will be created from the manifest of the top collection to the manifest of the subcollection.
  
  * b2safe_neo4j_client.py: it take in iput the manifest file stored under the iRODS path specified and translate its content together with some metadata got from the B2SAFE service into a graph, which is stored in a neo4j DB. If there is already a graph in the neo4j DB for the collection under the specified path, then the b2safe_neo4j_client will compare the "old" and "new" manifests (that assumed both to be under the collection path), extract the changes and update the graph accordingly.
  If the top collection contains a subcollection also with a manifest file discribing it and the manifest file of the top collection has a link element (mptr) in the structural map pointing to it, than the b2safe_neo4j_client will create a graph for the subcollection and connect this subgraph with the the graph of the top collection with the IS_LINKED_TO relation.
  
+And another, which is called by the b2safe_neo4j_client script:
+
  * validate_mets_manifest.py: it takes the path to the manifest file, that needs to be validated, analyse this of inconsistencies inside the mets dokument and if all files referenced are existence in iRODS collection under the same path as the manifest. At the end it writes the validaiton results in the log file and validaiton status in iRODS metadata and as attribute RECORDSTATUS of the metsHdr element inside the manifest.
 
 ## mets_factory
